@@ -1,3 +1,29 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+const firebaseConfig = {
+        apiKey: "AIzaSyDLxCEmP3RchhEwjRULu0ELMg_iLItBfkw",
+  authDomain: "class-tracker-7ec05.firebaseapp.com",
+  databaseURL: "https://class-tracker-7ec05-default-rtdb.firebaseio.com",
+  projectId: "class-tracker-7ec05",
+  storageBucket: "class-tracker-7ec05.firebasestorage.app",
+  messagingSenderId: "34124797425",
+  appId: "1:34124797425:web:9d92e45482eb27cff6e050"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const firestoreDb = getFirestore(firebaseApp);
+
 const DB_NAME = "myopia-tracker-db";
 const DB_VERSION = 1;
 const STORE_PROFILES = "profiles";
@@ -12,6 +38,16 @@ let currentChartMetric = "axial";
 let chart;
 let currentAverages = {};
 let currentCounts = {};
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
 
 const metricDefs = {
   axialRight: { label: "AL 眼轴", eye: "右眼", unit: "mm" },
@@ -200,50 +236,29 @@ function bindEvents() {
   });
 }
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(STORE_PROFILES)) {
-        database.createObjectStore(STORE_PROFILES, { keyPath: "id" });
-      }
-      if (!database.objectStoreNames.contains(STORE_RECORDS)) {
-        database.createObjectStore(STORE_RECORDS, { keyPath: "id" });
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+async function openDb() {
+  return firestoreDb;
 }
 
-function getAll(storeName) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readonly");
-    const request = tx.objectStore(storeName).getAll();
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(request.error);
-  });
+async function getAll(storeName) {
+  const snapshot = await getDocs(collection(firestoreDb, storeName));
+
+  return snapshot.docs.map((item) => ({
+    id: item.id,
+    ...item.data(),
+  }));
 }
 
-function putItem(storeName, item) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).put(item);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+async function putItem(storeName, item) {
+  if (!item.id) {
+    item.id = crypto.randomUUID();
+  }
+
+  await setDoc(doc(firestoreDb, storeName, item.id), item);
 }
 
-function deleteItem(storeName, id) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).delete(id);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+async function deleteItem(storeName, id) {
+  await deleteDoc(doc(firestoreDb, storeName, id));
 }
 
 async function loadProfiles() {
@@ -255,10 +270,23 @@ async function loadProfiles() {
 }
 
 async function loadRecords() {
-  const allRecords = await getAll(STORE_RECORDS);
-  records = allRecords
-    .filter((record) => record.profileId === activeProfileId)
-    .sort((a, b) => new Date(a.capturedAt) - new Date(b.capturedAt));
+  if (!activeProfileId) {
+    records = [];
+    return;
+  }
+
+  const recordsQuery = query(
+    collection(firestoreDb, STORE_RECORDS),
+    where("profileId", "==", activeProfileId),
+    orderBy("capturedAt", "asc"),
+  );
+
+  const snapshot = await getDocs(recordsQuery);
+
+  records = snapshot.docs.map((item) => ({
+    id: item.id,
+    ...item.data(),
+  }));
 }
 
 async function createProfile() {
