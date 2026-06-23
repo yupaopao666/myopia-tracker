@@ -258,3 +258,34 @@ canvas {
     display: grid;
   }
 }
+
+.reading-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.reading-table th,
+.reading-table td {
+  border: 1px solid var(--border);
+  padding: 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.reading-table th {
+  background: #eefafa;
+  color: var(--text);
+}
+
+.reading-table input {
+  width: 100%;
+  min-width: 100px;
+}
+
+.reading-table td:first-child {
+  font-weight: 700;
+  color: var(--text);
+}

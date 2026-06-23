@@ -10,35 +10,94 @@ let pendingReadings = [];
 let records = [];
 let currentChartMetric = "axial";
 let chart;
+let currentAverages = {};
+let currentCounts = {};
 
 const metricDefs = {
-  axialRight: { label: "右眼 AL 眼轴", unit: "mm" },
-  axialLeft: { label: "左眼 AL 眼轴", unit: "mm" },
+  axialRight: { label: "AL 眼轴", eye: "右眼", unit: "mm" },
+  axialLeft: { label: "AL 眼轴", eye: "左眼", unit: "mm" },
 
-  cornealThicknessRight: { label: "右眼 CT 角膜厚度", unit: "um" },
-  cornealThicknessLeft: { label: "左眼 CT 角膜厚度", unit: "um" },
+  cornealThicknessRight: { label: "CT 角膜厚度", eye: "右眼", unit: "um" },
+  cornealThicknessLeft: { label: "CT 角膜厚度", eye: "左眼", unit: "um" },
 
-  anteriorChamberDepthRight: { label: "右眼 AD 前房深度", unit: "mm" },
-  anteriorChamberDepthLeft: { label: "左眼 AD 前房深度", unit: "mm" },
+  anteriorChamberDepthRight: { label: "AD 前房深度", eye: "右眼", unit: "mm" },
+  anteriorChamberDepthLeft: { label: "AD 前房深度", eye: "左眼", unit: "mm" },
 
-  lensThicknessRight: { label: "右眼 LT 晶状体厚度", unit: "mm" },
-  lensThicknessLeft: { label: "左眼 LT 晶状体厚度", unit: "mm" },
+  lensThicknessRight: { label: "LT 晶状体厚度", eye: "右眼", unit: "mm" },
+  lensThicknessLeft: { label: "LT 晶状体厚度", eye: "左眼", unit: "mm" },
 
-  vitreousChamberLengthRight: { label: "右眼 VT 玻璃体腔长度", unit: "mm" },
-  vitreousChamberLengthLeft: { label: "左眼 VT 玻璃体腔长度", unit: "mm" },
+  vitreousChamberLengthRight: { label: "VT 玻璃体腔长度", eye: "右眼", unit: "mm" },
+  vitreousChamberLengthLeft: { label: "VT 玻璃体腔长度", eye: "左眼", unit: "mm" },
 
-  alCrRight: { label: "右眼 AL/CR", unit: "" },
-  alCrLeft: { label: "左眼 AL/CR", unit: "" },
+  alCrRight: { label: "AL/CR", eye: "右眼", unit: "" },
+  alCrLeft: { label: "AL/CR", eye: "左眼", unit: "" },
 
-  k1Right: { label: "右眼 K1", unit: "D" },
-  k1Left: { label: "左眼 K1", unit: "D" },
+  k1Right: { label: "K1", eye: "右眼", unit: "D" },
+  k1Left: { label: "K1", eye: "左眼", unit: "D" },
 
-  k2Right: { label: "右眼 K2", unit: "D" },
-  k2Left: { label: "左眼 K2", unit: "D" },
+  k2Right: { label: "K2", eye: "右眼", unit: "D" },
+  k2Left: { label: "K2", eye: "左眼", unit: "D" },
 
-  kappaRight: { label: "右眼 Kappa", unit: "" },
-  kappaLeft: { label: "左眼 Kappa", unit: "" },
+  kappaRight: { label: "Kappa", eye: "右眼", unit: "" },
+  kappaLeft: { label: "Kappa", eye: "左眼", unit: "" },
 };
+
+const metricRows = [
+  {
+    label: "AL 眼轴",
+    unit: "mm",
+    rightKey: "axialRight",
+    leftKey: "axialLeft",
+  },
+  {
+    label: "CT 角膜厚度",
+    unit: "um",
+    rightKey: "cornealThicknessRight",
+    leftKey: "cornealThicknessLeft",
+  },
+  {
+    label: "AD 前房深度",
+    unit: "mm",
+    rightKey: "anteriorChamberDepthRight",
+    leftKey: "anteriorChamberDepthLeft",
+  },
+  {
+    label: "LT 晶状体厚度",
+    unit: "mm",
+    rightKey: "lensThicknessRight",
+    leftKey: "lensThicknessLeft",
+  },
+  {
+    label: "VT 玻璃体腔长度",
+    unit: "mm",
+    rightKey: "vitreousChamberLengthRight",
+    leftKey: "vitreousChamberLengthLeft",
+  },
+  {
+    label: "AL/CR",
+    unit: "",
+    rightKey: "alCrRight",
+    leftKey: "alCrLeft",
+  },
+  {
+    label: "K1",
+    unit: "D",
+    rightKey: "k1Right",
+    leftKey: "k1Left",
+  },
+  {
+    label: "K2",
+    unit: "D",
+    rightKey: "k2Right",
+    leftKey: "k2Left",
+  },
+  {
+    label: "Kappa",
+    unit: "",
+    rightKey: "kappaRight",
+    leftKey: "kappaLeft",
+  },
+];
 
 const metricOrder = Object.keys(metricDefs);
 
@@ -56,6 +115,7 @@ const els = {
   ocrStatus: document.querySelector("#ocrStatus"),
   uploadList: document.querySelector("#uploadList"),
   averageSummary: document.querySelector("#averageSummary"),
+  calculateButton: document.querySelector("#calculateButton"),
   saveRecordButton: document.querySelector("#saveRecordButton"),
   readingTemplate: document.querySelector("#readingTemplate"),
   recordsList: document.querySelector("#recordsList"),
@@ -64,6 +124,7 @@ const els = {
   exportButton: document.querySelector("#exportButton"),
   importInput: document.querySelector("#importInput"),
   deleteProfileButton: document.querySelector("#deleteProfileButton"),
+  addRecordButton: document.querySelector("#addRecordButton"),
 };
 
 init();
@@ -102,6 +163,8 @@ function bindEvents() {
     els.imageInput.value = "";
   });
 
+  els.addRecordButton.addEventListener("click", addManualReading);
+
   els.uploadZone.addEventListener("dragover", (event) => {
     event.preventDefault();
     els.uploadZone.classList.add("drag-over");
@@ -120,6 +183,7 @@ function bindEvents() {
   els.analyzeButton.addEventListener("click", analyzePendingImages);
   els.clearUploadsButton.addEventListener("click", clearUploads);
   els.manualEntryButton.addEventListener("click", addManualReading);
+  els.calculateButton.addEventListener("click", calculateAndShowAverage);
   els.saveRecordButton.addEventListener("click", saveCurrentRecord);
 
   document.querySelectorAll(".tab").forEach((button) => {
@@ -270,92 +334,113 @@ async function analyzePendingImages() {
   if (imageReadings.length === 0) return;
 
   els.analyzeButton.disabled = true;
+  els.calculateButton.disabled = true;
+  els.saveRecordButton.disabled = true;
 
-  const nextReadings = pendingReadings.filter((reading) => !reading.file);
+  const existingReadings = pendingReadings.filter((reading) => !reading.file);
+  const nextReadings = [...existingReadings];
 
   for (const reading of imageReadings) {
     reading.status = "processing";
     renderUploads();
 
+    let text = "";
+
     try {
       els.ocrStatus.textContent = `正在分析 ${reading.fileName}`;
 
-      let result;
+      const result = await Tesseract.recognize(reading.file, "eng+chi_sim", {
+        logger: (message) => {
+          if (message.status === "recognizing text" && message.progress) {
+            els.ocrStatus.textContent = `正在分析 ${reading.fileName}: ${Math.round(message.progress * 100)}%`;
+          }
+        },
+      });
 
-      try {
-        result = await Tesseract.recognize(reading.file, "eng+chi_sim", {
-          logger: (message) => {
-            if (message.status === "recognizing text" && message.progress) {
-              els.ocrStatus.textContent = `正在分析 ${reading.fileName}: ${Math.round(message.progress * 100)}%`;
-            }
-          },
-        });
-      } catch (firstError) {
-        console.warn("eng+chi_sim OCR failed, falling back to eng:", firstError);
-
-        result = await Tesseract.recognize(reading.file, "eng", {
-          logger: (message) => {
-            if (message.status === "recognizing text" && message.progress) {
-              els.ocrStatus.textContent = `正在分析 ${reading.fileName}: ${Math.round(message.progress * 100)}%`;
-            }
-          },
-        });
-      }
-
-      const text = result.data.text || "";
+      text = result.data.text || "";
       console.log("OCR TEXT:", text);
-
-      const extraction = extractRecords(text);
-      console.log("EXTRACTION:", extraction);
-      console.log("EXTRACTION JSON:", JSON.stringify(extraction, null, 2));
-
-      if (extraction.records.length > 0) {
-        extraction.records.forEach((record, recordIndex) => {
-          nextReadings.push({
-            id: extraction.records.length === 1 ? reading.id : crypto.randomUUID(),
-            fileName:
-              extraction.records.length === 1
-                ? reading.fileName
-                : `${reading.fileName} · record ${recordIndex + 1}`,
-            file: null,
-            previewUrl: reading.previewUrl,
-            sourceImageName: reading.fileName,
-            status: "done",
-            text: record.text || text,
-            values: record.values,
-            sources: record.sources,
-          });
-        });
-      } else {
-        nextReadings.push({
-          ...reading,
-          file: null,
-          text: text || "OCR 没有返回文字",
-          values: {},
-          sources: {},
-          status: "failed",
-        });
-      }
     } catch (error) {
       console.error("OCR failed:", error);
-
-      nextReadings.push({
-        ...reading,
-        file: null,
-        text: `OCR 失败: ${error.message || error}`,
-        values: {},
-        sources: {},
-        status: "failed",
-      });
+      text = `OCR 失败: ${error.message || error}\n请手动填写表格。`;
     }
 
-    pendingReadings = [...nextReadings];
-    renderUploads();
+    const guessedRecords = extractTwoEditableRecordsFromOcr(text);
+
+    // 每张图片默认生成 2 条 record
+    for (let recordIndex = 0; recordIndex < 2; recordIndex += 1) {
+      nextReadings.push({
+        id: crypto.randomUUID(),
+        fileName: `${reading.fileName} · record ${recordIndex + 1}`,
+        file: null,
+        previewUrl: reading.previewUrl,
+        sourceImageName: reading.fileName,
+        status: "review",
+        text,
+        values: guessedRecords[recordIndex] || {},
+        sources: {},
+      });
+    }
   }
 
   pendingReadings = nextReadings;
-  els.ocrStatus.textContent = "识别完成，请确认数值";
+  currentAverages = {};
+  currentCounts = {};
+
+  els.ocrStatus.textContent = "已生成可编辑表格，请校对后点击“计算平均值”";
   renderUploads();
+}
+
+function extractTwoEditableRecordsFromOcr(text) {
+  const records = [{}, {}];
+
+  const lines = String(text)
+    .split(/\n+/)
+    .map((line) => normalizeEditableOcrLine(line))
+    .filter(Boolean);
+
+  const numericLines = lines.filter((line) => extractNumbers(line).length >= 2);
+
+  let recordIndex = 0;
+
+  numericLines.forEach((line) => {
+    const nums = extractNumbers(line);
+    const kPairs = extractKPairs(line);
+
+    // 尝试预填 AL / AD / LT / VT
+    const axial = nums.find((num) => num >= 20 && num <= 30);
+    const ct = nums.find((num) => num >= 450 && num <= 700);
+    const smallNums = nums.filter((num) => num >= 2.5 && num <= 5);
+    const vtCandidates = nums.filter((num) => num >= 14 && num <= 20);
+    const vt = vtCandidates.at(-1);
+
+    if (axial != null || vt != null) {
+      const target = records[Math.min(recordIndex, 1)];
+
+      if (axial != null) target.axialRight = axial;
+      if (ct != null) target.cornealThicknessRight = ct;
+      if (smallNums[0] != null) target.anteriorChamberDepthRight = smallNums[0];
+      if (smallNums[1] != null) target.lensThicknessRight = smallNums[1];
+      if (vt != null) target.vitreousChamberLengthRight = vt;
+
+      recordIndex += 1;
+      return;
+    }
+
+    // 尝试预填 AL/CR / K1 / K2 / Kappa
+    if (kPairs.length > 0) {
+      const target = records[Math.max(0, Math.min(recordIndex - 1, 1))];
+
+      const alCr = nums.find((num) => num >= 2.8 && num <= 3.5);
+      const kappa = nums.filter((num) => num > 0 && num < 10).at(-1);
+
+      if (alCr != null) target.alCrRight = alCr;
+      if (kPairs[0] != null) target.k1Right = kPairs[0];
+      if (kPairs[1] != null) target.k2Right = kPairs[1];
+      if (kappa != null) target.kappaRight = kappa;
+    }
+  });
+
+  return records;
 }
 
 function extractRecords(text) {
@@ -511,14 +596,18 @@ function renderUploads() {
       }
 
       input.addEventListener("input", () => {
-        const value = Number(input.value);
-        if (Number.isFinite(value)) {
-          reading.values[key] = value;
-        } else {
-          delete reading.values[key];
-        }
-        updateAverageSummary();
-      });
+  const value = Number(input.value);
+
+  if (Number.isFinite(value)) {
+    reading.values[key] = value;
+  } else {
+    delete reading.values[key];
+  }
+
+  currentAverages = {};
+  currentCounts = {};
+  updateAverageSummary();
+});
     });
 
     pre.textContent = reading.text || "";
@@ -527,6 +616,226 @@ function renderUploads() {
 
   els.analyzeButton.disabled = !pendingReadings.some((reading) => reading.file);
   updateAverageSummary();
+}
+
+function extractRecordsForEditableTable(text) {
+  const blocks = splitOcrIntoPossibleRecords(text);
+  const records = [];
+
+  blocks.forEach((block, index) => {
+    const extraction = extractValuesForEditableTable(block);
+
+    records.push({
+      index,
+      text: block,
+      values: extraction.values,
+      sources: extraction.sources,
+    });
+  });
+
+  return { records };
+}
+
+function splitOcrIntoPossibleRecords(text) {
+  const lines = String(text)
+    .split(/\n+/)
+    .map((line) => normalizeEditableOcrLine(line))
+    .filter(Boolean);
+
+  const blocks = [];
+  let current = [];
+  let seenDataLine = false;
+
+  lines.forEach((line) => {
+    const nums = extractNumbers(line);
+    const hasAxial = nums.some((num) => num >= 20 && num <= 30);
+    const hasVt = nums.some((num) => num >= 14 && num <= 20);
+    const looksLikeNewRecord = hasAxial && hasVt && seenDataLine;
+
+    if (looksLikeNewRecord && current.length > 0) {
+      blocks.push(current.join("\n"));
+      current = [];
+      seenDataLine = false;
+    }
+
+    current.push(line);
+
+    if (hasAxial || hasVt || extractKPairs(line).length > 0) {
+      seenDataLine = true;
+    }
+  });
+
+  if (current.length > 0) {
+    blocks.push(current.join("\n"));
+  }
+
+  return blocks.length > 0 ? blocks : [String(text)];
+}
+
+function extractValuesForEditableTable(text) {
+  const values = {};
+  const sources = {};
+
+  const lines = String(text)
+    .split(/\n+/)
+    .map((line) => normalizeEditableOcrLine(line))
+    .filter(Boolean);
+
+  lines.forEach((line) => {
+    const nums = extractNumbers(line);
+    const kPairs = extractKPairs(line);
+
+    // K row:
+    // 右眼: AL/CR K1 K2 Kappa
+    // 左眼: AL/CR K1 K2 Kappa
+    //
+    // 理想 OCR:
+    // 3.16 42.88/158 44.00/68 0.9  3.15 42.93/178 43.83/88 0.9
+    if (kPairs.length > 0) {
+      parseEditableKLine(line, nums, kPairs, values, sources);
+      return;
+    }
+
+    // Biometry row:
+    // 右眼: AL CT AD LT VT
+    // 左眼: AL CT AD LT VT
+    //
+    // 理想 OCR:
+    // 24.54 555.00 3.17 3.61 17.20  24.54 558.00 3.18 3.62 17.18
+    parseEditableBiometryLine(line, nums, values, sources);
+  });
+
+  return { values, sources };
+}
+
+function parseEditableBiometryLine(line, nums, values, sources) {
+  if (nums.length < 2) return;
+
+  // 最理想情况：一行有左右眼两套完整数据，共 10 个数字
+  if (nums.length >= 10) {
+    assignBiometryGroup(values, sources, "Right", nums.slice(0, 5), line);
+    assignBiometryGroup(values, sources, "Left", nums.slice(5, 10), line);
+    return;
+  }
+
+  // 有时候 OCR 会把左右眼拆在不同行，或者只识别出一边
+  // 这里尽量判断这一行像不像一套 AL/CT/AD/LT/VT
+  const group = extractOneBiometryGroup(nums);
+
+  if (!group) return;
+
+  // 如果右眼还空，先填右眼；否则填左眼
+  if (values.axialRight == null) {
+    assignBiometryGroup(values, sources, "Right", group, line);
+  } else if (values.axialLeft == null) {
+    assignBiometryGroup(values, sources, "Left", group, line);
+  }
+}
+
+function assignBiometryGroup(values, sources, side, group, sourceLine) {
+  const suffix = side === "Right" ? "Right" : "Left";
+
+  const axial = group[0];
+  const ct = group[1];
+  const ad = group[2];
+  const lt = group[3];
+  const vt = group[4];
+
+  setEditableValue(values, sources, `axial${suffix}`, axial, sourceLine);
+
+  // CT 正常是 450-700；如果 OCR 读成 55.0 / 56.6，不要强行填
+  if (ct >= 450 && ct <= 700) {
+    setEditableValue(values, sources, `cornealThickness${suffix}`, ct, sourceLine);
+  }
+
+  setEditableValue(values, sources, `anteriorChamberDepth${suffix}`, ad, sourceLine);
+  setEditableValue(values, sources, `lensThickness${suffix}`, lt, sourceLine);
+  setEditableValue(values, sources, `vitreousChamberLength${suffix}`, vt, sourceLine);
+}
+
+function extractOneBiometryGroup(nums) {
+  const axial = nums.find((num) => num >= 20 && num <= 30);
+  const ct = nums.find((num) => num >= 450 && num <= 700);
+  const smallNums = nums.filter((num) => num >= 2.5 && num <= 5);
+  const vtCandidates = nums.filter((num) => num >= 14 && num <= 20);
+
+  if (axial == null && vtCandidates.length === 0) return null;
+
+  return [
+    axial ?? null,
+    ct ?? null,
+    smallNums[0] ?? null,
+    smallNums[1] ?? null,
+    vtCandidates.at(-1) ?? null,
+  ];
+}
+
+function parseEditableKLine(line, nums, kPairs, values, sources) {
+  // 理想情况：左右眼各有 K1/K2，共 4 个 pair
+  if (kPairs.length >= 4) {
+    const rightKappa = findKappaAfterPairs(nums, 0);
+    const leftKappa = findKappaAfterPairs(nums, 1);
+
+    setEditableValue(values, sources, "k1Right", kPairs[0], line);
+    setEditableValue(values, sources, "k2Right", kPairs[1], line);
+    setEditableValue(values, sources, "kappaRight", rightKappa, line);
+
+    setEditableValue(values, sources, "k1Left", kPairs[2], line);
+    setEditableValue(values, sources, "k2Left", kPairs[3], line);
+    setEditableValue(values, sources, "kappaLeft", leftKappa, line);
+
+    const alCrValues = nums.filter((num) => num >= 2.8 && num <= 3.5);
+    setEditableValue(values, sources, "alCrRight", alCrValues[0], line);
+    setEditableValue(values, sources, "alCrLeft", alCrValues[1], line);
+    return;
+  }
+
+  // 一边数据：先填右眼，再填左眼
+  const side = values.k1Right == null ? "Right" : "Left";
+  const suffix = side === "Right" ? "Right" : "Left";
+
+  setEditableValue(values, sources, `k1${suffix}`, kPairs[0], line);
+  setEditableValue(values, sources, `k2${suffix}`, kPairs[1], line);
+
+  const alCr = nums.find((num) => num >= 2.8 && num <= 3.5);
+  setEditableValue(values, sources, `alCr${suffix}`, alCr, line);
+
+  const possibleKappa = nums
+    .filter((num) => num > 0 && num < 10)
+    .at(-1);
+
+  setEditableValue(values, sources, `kappa${suffix}`, possibleKappa, line);
+}
+
+function findKappaAfterPairs(nums, sideIndex) {
+  const possible = nums.filter((num) => num > 0 && num < 10);
+
+  // 右眼通常是第一个小数 kappa，左眼通常是第二个
+  return possible[sideIndex] ?? null;
+}
+
+function setEditableValue(values, sources, key, value, sourceLine) {
+  if (!Number.isFinite(value)) return;
+  if (values[key] != null) return;
+
+  values[key] = value;
+  sources[key] = sourceLine;
+}
+
+function assignEditableValue(values, sources, key, value, sourceLine) {
+  if (!Number.isFinite(value)) return;
+  if (values[key] != null) return;
+
+  values[key] = value;
+  sources[key] = sourceLine;
+}
+
+function normalizeEditableOcrLine(line) {
+  return String(line)
+    .replace(/,/g, ".")
+    .replace(/[|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function extractValues(text) {
@@ -781,23 +1090,53 @@ function extractKPairs(line) {
 }
 
 function renderMetricInputs(container) {
-  container.innerHTML = metricOrder
-    .map((key) => {
-      const metric = metricDefs[key];
-      return `
-        <label>
-          <span>${metric.label} ${metric.unit}</span>
-          <input type="number" step="0.01" data-metric="${key}" placeholder="待识别" />
-        </label>
-      `;
-    })
-    .join("");
+  container.innerHTML = `
+    <table class="reading-table">
+      <thead>
+        <tr>
+          <th>项目</th>
+          <th>右眼</th>
+          <th>左眼</th>
+          <th>单位</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${metricRows
+          .map(
+            (row) => `
+              <tr>
+                <td>${row.label}</td>
+                <td>
+                  <input
+                    type="number"
+                    step="0.01"
+                    data-metric="${row.rightKey}"
+                    placeholder="待填写"
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    step="0.01"
+                    data-metric="${row.leftKey}"
+                    placeholder="待填写"
+                  />
+                </td>
+                <td>${row.unit}</td>
+              </tr>
+            `,
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
 }
 
 function statusText(status) {
   if (status === "new") return "待分析";
   if (status === "processing") return "识别中";
   if (status === "done") return "已识别";
+  if (status === "review") return "请校对";
   if (status === "failed") return "识别失败";
   if (status === "manual") return "手动";
   return "待确认";
@@ -822,19 +1161,60 @@ function calculateAveragesWithCounts() {
 }
 
 function updateAverageSummary() {
-  const { averages, counts } = calculateAveragesWithCounts();
-  const entries = Object.entries(averages);
+  const hasAnyValue = pendingReadings.some((reading) =>
+    Object.values(reading.values || {}).some((value) => Number.isFinite(value)),
+  );
 
-  els.saveRecordButton.disabled = entries.length === 0;
+  els.calculateButton.disabled = !hasAnyValue;
 
-  if (!entries.length) {
-    els.averageSummary.textContent = "还没有可保存的数据";
+  if (Object.keys(currentAverages).length === 0) {
+    els.saveRecordButton.disabled = true;
+
+    if (!hasAnyValue) {
+      els.averageSummary.textContent = "还没有可计算的数据";
+    } else {
+      els.averageSummary.textContent = "已填写数据，请点击“计算平均值”";
+    }
+
     return;
   }
 
-  els.averageSummary.textContent = entries
-    .map(([key, value]) => `${metricDefs[key].label} ${formatMetricValue(value)}（n=${counts[key]}）`)
+  els.saveRecordButton.disabled = false;
+
+  els.averageSummary.textContent = Object.entries(currentAverages)
+    .map(([key, value]) => {
+      const metric = metricDefs[key];
+      const count = currentCounts[key] || 0;
+      return `${metric.eye} ${metric.label}: ${formatMetricValue(value)} ${metric.unit}（n=${count}）`;
+    })
     .join(" · ");
+}
+
+function calculateAndShowAverage() {
+  const result = calculateAveragesWithCounts();
+
+  currentAverages = result.averages;
+  currentCounts = result.counts;
+
+  updateAverageSummary();
+}
+
+function calculateAveragesWithCounts() {
+  const averages = {};
+  const counts = {};
+
+  metricOrder.forEach((key) => {
+    const nums = pendingReadings
+      .map((reading) => reading.values?.[key])
+      .filter((value) => Number.isFinite(value));
+
+    if (nums.length > 0) {
+      averages[key] = nums.reduce((sum, value) => sum + value, 0) / nums.length;
+      counts[key] = nums.length;
+    }
+  });
+
+  return { averages, counts };
 }
 
 function formatMetricValue(value) {
@@ -842,18 +1222,24 @@ function formatMetricValue(value) {
 }
 
 async function saveCurrentRecord() {
-  const { averages, counts } = calculateAveragesWithCounts();
-  if (!activeProfileId || Object.keys(averages).length === 0) return;
+  if (!activeProfileId) return;
+
+  if (Object.keys(currentAverages).length === 0) {
+    calculateAndShowAverage();
+  }
+
+  if (Object.keys(currentAverages).length === 0) return;
 
   const record = {
     id: crypto.randomUUID(),
     profileId: activeProfileId,
     capturedAt: new Date(els.capturedAtInput.value || Date.now()).toISOString(),
     createdAt: new Date().toISOString(),
-    averages,
-    counts,
+    averages: currentAverages,
+    counts: currentCounts,
     readings: pendingReadings.map((reading) => ({
       fileName: reading.fileName,
+      sourceImageName: reading.sourceImageName || reading.fileName,
       text: reading.text,
       values: reading.values,
       status: reading.status,
@@ -861,6 +1247,10 @@ async function saveCurrentRecord() {
   };
 
   await putItem(STORE_RECORDS, record);
+
+  currentAverages = {};
+  currentCounts = {};
+
   clearUploads();
   await loadRecords();
   renderAll();

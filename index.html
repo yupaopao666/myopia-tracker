@@ -41,6 +41,7 @@
         </label>
 
         <button id="manualEntryButton" type="button">手动录入</button>
+        <button id="addRecordButton" type="button">新增 record</button>
       </div>
 
       <div class="upload-zone" id="uploadZone">
@@ -61,10 +62,14 @@
       <div id="uploadList"></div>
 
       <section class="average-box">
-        <h2>当次平均值</h2>
-        <p id="averageSummary">还没有可保存的数据</p>
-        <button id="saveRecordButton" type="button" disabled>保存 data point</button>
-      </section>
+  <h2>当次平均值</h2>
+  <p id="averageSummary">请先确认每条 record，然后点击“计算平均值”</p>
+
+  <div class="actions">
+    <button id="calculateButton" type="button" disabled>计算平均值</button>
+    <button id="saveRecordButton" type="button" disabled>保存 data point</button>
+  </div>
+</section>
     </section>
 
     <section id="trendsTab" class="tab-panel">
