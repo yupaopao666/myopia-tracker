@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7fafc" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="眼测量记录" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>眼生物测量记录</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./assets/icon-180.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Myopia Tracker</p>
+          <h1>眼生物测量记录</h1>
+        </div>
+        <button class="icon-text-button install-button" id="installButton" hidden type="button">
+          <span aria-hidden="true">↓</span>
+          <span>安装</span>
+        </button>
+      </header>
+
+      <main class="shell">
+        <section class="profile-strip" aria-label="用户选择">
+          <label class="field field-profile">
+            <span>当前用户</span>
+            <select id="profileSelect"></select>
+          </label>
+          <form class="new-profile-form" id="newProfileForm">
+            <label class="field">
+              <span>新用户</span>
+              <input id="newProfileName" name="name" autocomplete="off" placeholder="名字" />
+            </label>
+            <button class="primary-button compact" type="submit">创建</button>
+          </form>
+        </section>
+
+        <nav class="tabs" aria-label="主要功能">
+          <button class="tab-button active" data-tab="upload" type="button">上传</button>
+          <button class="tab-button" data-tab="trends" type="button">趋势</button>
+          <button class="tab-button" data-tab="records" type="button">记录</button>
+        </nav>
+
+        <section class="panel active" id="uploadPanel" data-panel="upload">
+          <div class="toolbar">
+            <label class="field field-time">
+              <span>检查时间</span>
+              <input id="capturedAtInput" type="datetime-local" />
+            </label>
+            <button class="secondary-button" id="addManualReadingButton" type="button">手动录入</button>
+          </div>
+
+          <label class="upload-zone" for="imageInput">
+            <input id="imageInput" type="file" accept="image/*" multiple />
+            <span class="upload-icon" aria-hidden="true">+</span>
+            <span>选择 1 张或多张图片</span>
+          </label>
+
+          <div class="action-row">
+            <button class="primary-button" id="analyzeButton" type="button" disabled>分析图片</button>
+            <button class="secondary-button" id="clearUploadButton" type="button" disabled>清空</button>
+          </div>
+
+          <div class="status-line" id="ocrStatus" role="status">等待上传图片</div>
+          <div class="reading-list" id="readingList"></div>
+
+          <section class="save-panel" id="savePanel" hidden>
+            <div>
+              <h2>当次平均值</h2>
+              <p id="averageSummary">还没有可保存的数据</p>
+            </div>
+            <button class="primary-button" id="saveRecordButton" type="button">保存 data point</button>
+          </section>
+        </section>
+
+        <section class="panel" id="trendsPanel" data-panel="trends">
+          <div class="metric-switcher" id="metricSwitcher" aria-label="趋势指标">
+            <button class="metric-button active" data-metric="axial" type="button">眼轴</button>
+            <button class="metric-button" data-metric="refraction" type="button">屈光</button>
+            <button class="metric-button" data-metric="axialVelocity" type="button">眼轴速度</button>
+            <button class="metric-button" data-metric="refractionVelocity" type="button">屈光速度</button>
+            <button class="metric-button" data-metric="cornealThickness" type="button">CT</button>
+            <button class="metric-button" data-metric="anteriorChamberDepth" type="button">AD</button>
+            <button class="metric-button" data-metric="lensThickness" type="button">LT</button>
+            <button class="metric-button" data-metric="vitreousChamberLength" type="button">VT</button>
+            <button class="metric-button" data-metric="k1" type="button">K1</button>
+            <button class="metric-button" data-metric="k2" type="button">K2</button>
+          </div>
+
+          <div class="chart-panel">
+            <canvas id="trendCanvas" height="360"></canvas>
+            <div class="empty-state" id="chartEmptyState">当前用户还没有记录</div>
+          </div>
+
+          <div class="stat-grid" id="trendStats"></div>
+        </section>
+
+        <section class="panel" id="recordsPanel" data-panel="records">
+          <div class="record-actions">
+            <button class="secondary-button" id="exportButton" type="button">导出 JSON</button>
+            <label class="secondary-button import-button">
+              导入 JSON
+              <input id="importInput" type="file" accept="application/json" />
+            </label>
+            <button class="danger-button" id="deleteProfileButton" type="button">删除当前用户</button>
+          </div>
+          <div class="record-list" id="recordList"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="readingCardTemplate">
+      <article class="reading-card">
+        <div class="reading-media">
+          <img alt="" class="reading-preview" />
+        </div>
+        <div class="reading-content">
+          <div class="reading-heading">
+            <h3></h3>
+            <span class="badge">待确认</span>
+          </div>
+          <div class="reading-fields"></div>
+          <details class="ocr-details">
+            <summary>识别文本</summary>
+            <pre></pre>
+          </details>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

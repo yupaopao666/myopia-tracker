@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Myopia Tracker">
+  <rect width="512" height="512" rx="96" fill="#f4f7f8"/>
+  <path d="M88 260c42-68 96-102 168-102s126 34 168 102c-42 68-96 102-168 102S130 328 88 260Z" fill="#fff" stroke="#2e8798" stroke-width="26" stroke-linejoin="round"/>
+  <circle cx="256" cy="260" r="58" fill="#7b2cc5"/>
+  <circle cx="276" cy="238" r="18" fill="#fff" opacity=".9"/>
+  <path d="M126 384c58-54 112-72 162-54 34 12 61 3 98-38" fill="none" stroke="#d28b00" stroke-width="24" stroke-linecap="round"/>
+</svg>
