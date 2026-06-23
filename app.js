@@ -21,6 +21,7 @@ const firebaseConfig = {
   appId: "1:34124797425:web:9d92e45482eb27cff6e050"
 };
 
+
 const firebaseApp = initializeApp(firebaseConfig);
 const firestoreDb = getFirestore(firebaseApp);
 
@@ -38,16 +39,7 @@ let currentChartMetric = "axial";
 let chart;
 let currentAverages = {};
 let currentCounts = {};
-
-rules_version = '2';
-
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
-    }
-  }
-}
+let trendChart = null;
 
 const metricDefs = {
   axialRight: { label: "AL 眼轴", eye: "右眼", unit: "mm" },
@@ -134,6 +126,7 @@ const metricRows = [
     leftKey: "kappaLeft",
   },
 ];
+
 
 const metricOrder = Object.keys(metricDefs);
 
@@ -290,22 +283,44 @@ async function loadRecords() {
 }
 
 async function createProfile() {
+  console.log("createProfile clicked");
+
   const name = els.profileNameInput.value.trim();
-  if (!name) return;
 
-  const profile = {
-    id: crypto.randomUUID(),
-    name,
-    createdAt: new Date().toISOString(),
-  };
+  if (!name) {
+    alert("请输入新用户名字");
+    els.profileNameInput.focus();
+    return;
+  }
 
-  await putItem(STORE_PROFILES, profile);
-  els.profileNameInput.value = "";
-  await loadProfiles();
-  activeProfileId = profile.id;
-  localStorage.setItem("activeProfileId", activeProfileId);
-  await loadRecords();
-  renderAll();
+  try {
+    els.createProfileButton.disabled = true;
+    els.createProfileButton.textContent = "创建中...";
+
+    const profile = {
+      id: crypto.randomUUID(),
+      name,
+      createdAt: new Date().toISOString(),
+    };
+
+    await putItem(STORE_PROFILES, profile);
+
+    els.profileNameInput.value = "";
+    activeProfileId = profile.id;
+    localStorage.setItem("activeProfileId", activeProfileId);
+
+    await loadProfiles();
+    await loadRecords();
+    renderAll();
+
+    console.log("profile created", profile);
+  } catch (error) {
+    console.error("Create profile failed:", error);
+    alert(`创建用户失败：${error.message || error}`);
+  } finally {
+    els.createProfileButton.disabled = false;
+    els.createProfileButton.textContent = "创建";
+  }
 }
 
 function setDefaultCapturedAt() {
@@ -547,19 +562,6 @@ function normalizeOcrLineForRecords(line) {
     .replace(/[|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function findNextNumericLine(lines, startIndex) {
-  for (let i = startIndex; i < Math.min(lines.length, startIndex + 6); i += 1) {
-    if (extractNumbers(lines[i]).length >= 2) return lines[i];
-  }
-  return "";
-}
-
-function extractNumbers(line) {
-  return [...String(line).matchAll(/-?\d+(?:[.,]\d+)?/g)]
-    .map((match) => Number(match[0].replace(",", ".")))
-    .filter(Number.isFinite);
 }
 
 function extractKPairs(line) {
@@ -1111,12 +1113,6 @@ function extractNumbers(line) {
     .filter(Number.isFinite);
 }
 
-function extractKPairs(line) {
-  return [...String(line).matchAll(/(\d{2}(?:[.,]\d+)?)\s*\/\s*\d{1,3}/g)]
-    .map((match) => Number(match[1].replace(",", ".")))
-    .filter(Number.isFinite);
-}
-
 function renderMetricInputs(container) {
   container.innerHTML = `
     <table class="reading-table">
@@ -1168,24 +1164,6 @@ function statusText(status) {
   if (status === "failed") return "识别失败";
   if (status === "manual") return "手动";
   return "待确认";
-}
-
-function calculateAveragesWithCounts() {
-  const averages = {};
-  const counts = {};
-
-  metricOrder.forEach((key) => {
-    const nums = pendingReadings
-      .map((reading) => reading.values[key])
-      .filter(Number.isFinite);
-
-    if (nums.length) {
-      averages[key] = nums.reduce((sum, value) => sum + value, 0) / nums.length;
-      counts[key] = nums.length;
-    }
-  });
-
-  return { averages, counts };
 }
 
 function updateAverageSummary() {
@@ -1315,41 +1293,53 @@ function renderRecords() {
 }
 
 function renderChart() {
-  if (!els.trendCanvas || typeof Chart === "undefined") return;
+  const canvas = els.trendCanvas;
+  if (!canvas || typeof Chart === "undefined") return;
 
-  const metricMap = {
-  axial: ["axialRight", "axialLeft"],
-  cornealThickness: ["cornealThicknessRight", "cornealThicknessLeft"],
-  anteriorChamberDepth: ["anteriorChamberDepthRight", "anteriorChamberDepthLeft"],
-  lensThickness: ["lensThicknessRight", "lensThicknessLeft"],
-  vitreousChamberLength: ["vitreousChamberLengthRight", "vitreousChamberLengthLeft"],
-  alCr: ["alCrRight", "alCrLeft"],
-  k1: ["k1Right", "k1Left"],
-  k2: ["k2Right", "k2Left"],
-  kappa: ["kappaRight", "kappaLeft"],
-};
+  if (chart) {
+    chart.destroy();
+    chart = null;
+  }
 
-  const keys = metricMap[currentChartMetric] || metricMap.axial;
-  const labels = records.map((record) => new Date(record.capturedAt).toLocaleDateString());
+  const existingChart = Chart.getChart(canvas);
+  if (existingChart) {
+    existingChart.destroy();
+  }
 
-  const datasets = keys.map((key) => ({
-    label: metricDefs[key].label,
-    data: records.map((record) => record.averages[key] ?? null),
-    spanGaps: true,
-  }));
+  const rightKey = `${currentChartMetric}Right`;
+  const leftKey = `${currentChartMetric}Left`;
+
+  const metricLabel =
+    metricDefs[rightKey]?.label ||
+    metricDefs[leftKey]?.label ||
+    currentChartMetric;
 
   els.emptyTrendMessage.hidden = records.length > 0;
 
-  if (chart) chart.destroy();
-
-  chart = new Chart(els.trendCanvas, {
+  chart = new Chart(canvas, {
     type: "line",
-    data: { labels, datasets },
+    data: {
+      labels: records.map((record) =>
+        new Date(record.capturedAt || record.date).toLocaleDateString()
+      ),
+      datasets: [
+        {
+          label: `${metricLabel} 右眼`,
+          data: records.map((record) => record.values?.[rightKey] ?? null),
+          tension: 0.3,
+          spanGaps: true,
+        },
+        {
+          label: `${metricLabel} 左眼`,
+          data: records.map((record) => record.values?.[leftKey] ?? null),
+          tension: 0.3,
+          spanGaps: true,
+        },
+      ],
+    },
     options: {
       responsive: true,
-      scales: {
-        y: { beginAtZero: false },
-      },
+      maintainAspectRatio: false,
     },
   });
 }
