@@ -508,9 +508,16 @@ function addManualReading() {
 }
 
 function clearUploads() {
-  pendingReadings.forEach((reading) => {
-    if (reading.previewUrl) URL.revokeObjectURL(reading.previewUrl);
+  const previewUrls = new Set(
+    pendingReadings
+      .map((reading) => reading.previewUrl)
+      .filter(Boolean),
+  );
+
+  previewUrls.forEach((previewUrl) => {
+    URL.revokeObjectURL(previewUrl);
   });
+
   pendingReadings = [];
   els.ocrStatus.textContent = "等待上传图片";
   renderUploads();
@@ -564,10 +571,16 @@ function renderMetricInputs(container) {
   container.innerHTML = metricOrder
     .map((key) => {
       const metric = metricDefs[key];
+
       return `
-        <label class="field">
+        <label>
           <span>${metric.label} ${metric.unit}</span>
-          <input data-metric="${key}" inputmode="decimal" placeholder="${metric.placeholder}" />
+          <input
+            type="number"
+            step="0.01"
+            data-metric="${key}"
+            placeholder="待识别"
+          />
         </label>
       `;
     })
@@ -584,6 +597,7 @@ function getReadingStatusLabel(status) {
 
 async function analyzePendingImages() {
   if (!pendingReadings.some((reading) => reading.file)) return;
+
   els.analyzeButton.disabled = true;
   els.ocrStatus.textContent = "正在加载 OCR";
 
@@ -598,32 +612,78 @@ async function analyzePendingImages() {
     return;
   }
 
-  for (const [index, reading] of pendingReadings.entries()) {
-    if (!reading.file) continue;
+  const originalReadings = [...pendingReadings];
+  const nextReadings = [];
+  const imageReadings = originalReadings.filter((reading) => reading.file);
+  let processedImageCount = 0;
+
+  for (const reading of originalReadings) {
+    if (!reading.file) {
+      nextReadings.push(reading);
+      continue;
+    }
+
+    processedImageCount += 1;
     reading.status = "processing";
+    pendingReadings = [...nextReadings, reading, ...originalReadings.slice(originalReadings.indexOf(reading) + 1)];
     renderUploads();
-    els.ocrStatus.textContent = `正在分析 ${index + 1}/${pendingReadings.length}`;
+
+    els.ocrStatus.textContent = `正在分析 ${processedImageCount}/${imageReadings.length}`;
+
     try {
       const result = await Tesseract.recognize(reading.file, "eng+chi_sim", {
         logger: (message) => {
           if (message.status === "recognizing text" && message.progress) {
             const pct = Math.round(message.progress * 100);
-            els.ocrStatus.textContent = `正在分析 ${index + 1}/${pendingReadings.length}: ${pct}%`;
+            els.ocrStatus.textContent = `正在分析 ${processedImageCount}/${imageReadings.length}: ${pct}%`;
           }
         },
       });
-      reading.text = result.data.text.trim();
-      const extraction = extractValues(reading.text);
-      reading.values = { ...reading.values, ...extraction.values };
-      reading.sources = { ...reading.sources, ...extraction.sources };
-      reading.status = "done";
+
+      const ocrText = result.data.text.trim();
+      const extraction = extractRecords(ocrText);
+
+      if (extraction.records.length === 0) {
+        nextReadings.push({
+          ...reading,
+          text: ocrText,
+          values: {},
+          sources: {},
+          status: "failed",
+        });
+        continue;
+      }
+
+      extraction.records.forEach((record, recordIndex) => {
+        const isSingleRecord = extraction.records.length === 1;
+
+        nextReadings.push({
+          id: isSingleRecord ? reading.id : crypto.randomUUID(),
+          fileName: isSingleRecord
+            ? reading.fileName
+            : `${reading.fileName} · record ${recordIndex + 1}`,
+          file: null,
+          previewUrl: reading.previewUrl,
+          sourceImageName: reading.fileName,
+          status: "done",
+          text: record.text || ocrText,
+          values: record.values,
+          sources: record.sources,
+        });
+      });
     } catch (error) {
-      reading.text = `OCR 失败: ${error.message || error}`;
-      reading.status = "failed";
+      nextReadings.push({
+        ...reading,
+        text: `OCR 失败: ${error.message || error}`,
+        values: {},
+        sources: {},
+        status: "failed",
+      });
     }
   }
 
-  els.ocrStatus.textContent = "识别完成，请确认数值后保存";
+  pendingReadings = nextReadings;
+  els.ocrStatus.textContent = "识别完成，请确认每条 record 的数值后保存";
   renderUploads();
 }
 
@@ -648,75 +708,455 @@ function formatReadingTrace(reading) {
   return `提取来源:\n${sourceText}\n\nOCR文本:\n${reading.text || "暂无识别文本"}`;
 }
 
-function extractValues(text) {
-  const values = {};
-  const sources = {};
+
+function extractRecords(text) {
   const lines = text
     .split(/\n+/)
     .map((line) => normalizeOcrLine(line))
-    .filter(Boolean);
-  const windows = lines.map((line, index) => [lines[index - 1], line, lines[index + 1]].filter(Boolean).join(" "));
+    .filter(Boolean)
+    .filter((line) => !isLikelyChartOrUiText(line));
 
-  windows.forEach((line) => {
-    if (isLikelyChartOrUiText(line)) return;
-    const nums = extractNumbers(line);
-    if (nums.length === 0) return;
-    const side = detectSide(line);
+  const blocks = splitRecordBlocks(lines);
+
+  const records = blocks
+    .map((block, index) => {
+      const blockText = block.join("\n");
+      const extraction = extractValues(blockText);
+
+      return {
+        index,
+        text: blockText,
+        values: extraction.values,
+        sources: extraction.sources,
+      };
+    })
+    .filter((record) => Object.keys(record.values).length > 0);
+
+  // fallback: 如果分块失败，就把整张图作为一条 record
+  if (records.length === 0) {
+    const fallback = extractValues(text);
+
+    if (Object.keys(fallback.values).length > 0) {
+      records.push({
+        index: 0,
+        text,
+        values: fallback.values,
+        sources: fallback.sources,
+      });
+    }
+  }
+
+  return { records };
+}
+
+function splitRecordBlocks(lines) {
+  const obviousBlocks = splitByObviousRecordSeparators(lines);
+
+  if (obviousBlocks.length > 1) {
+    return obviousBlocks;
+  }
+
+  const metricBlocks = splitByRepeatedMetricStarts(lines);
+
+  if (metricBlocks.length > 1) {
+    return metricBlocks;
+  }
+
+  return [lines];
+}
+
+function splitByObviousRecordSeparators(lines) {
+  const blocks = [];
+  let current = [];
+
+  lines.forEach((line) => {
+    const startsNewRecord = isRecordStartLine(line);
+
+    if (startsNewRecord && current.length > 0) {
+      blocks.push(current);
+      current = [];
+    }
+
+    current.push(line);
+  });
+
+  if (current.length > 0) {
+    blocks.push(current);
+  }
+
+  return blocks;
+}
+
+function isRecordStartLine(line) {
+  return /record|记录|检查|测量|验光|生物测量|biometry|i[o0]l|患者|姓名|日期|时间|no\.?\s*\d+|#\s*\d+/i.test(line);
+}
+
+function splitByRepeatedMetricStarts(lines) {
+  const blocks = [];
+  let current = [];
+  let currentHasData = false;
+
+  lines.forEach((line) => {
+    const startsNewMetricGroup = looksLikeFirstMetricOfRecord(line);
+    const hasRecordData = hasAnyMetricData(line);
+
+    if (startsNewMetricGroup && currentHasData && current.length > 0) {
+      blocks.push(current);
+      current = [];
+      currentHasData = false;
+    }
+
+    current.push(line);
+
+    if (hasRecordData) {
+      currentHasData = true;
+    }
+  });
+
+  if (current.length > 0) {
+    blocks.push(current);
+  }
+
+  return blocks;
+}
+
+function looksLikeFirstMetricOfRecord(line) {
+  const lower = line.toLowerCase();
+
+  return /眼轴|轴长|axial length|a\/l|\bal\b/.test(lower);
+}
+
+function hasAnyMetricData(line) {
+  const lower = line.toLowerCase();
+
+  return /眼轴|轴长|axial length|a\/l|\bal\b|屈光|球镜|等效|se\b|spherical|diopter|\bd\b|ct\b|cct\b|角膜厚度|ad\b|acd\b|前房|lt\b|晶状体|vt\b|玻璃体|k\s*1|k\s*2|角膜曲率/.test(lower);
+}
+
+function extractValues(text) {
+  const values = {};
+  const sources = {};
+
+  const lines = text
+    .split(/\n+/)
+    .map((line) => normalizeOcrLine(line))
+    .filter(Boolean)
+    .filter((line) => !isLikelyChartOrUiText(line));
+
+  extractSideBySideTableValues(lines, values, sources);
+  extractNonTableValues(lines, values, sources);
+
+  return { values, sources };
+}
+
+function extractSideBySideTableValues(lines, values, sources) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
     const lower = line.toLowerCase();
-    const hasKData = /\bk\s*[12]\b|角膜曲率|keratometry|corneal curvature/.test(lower);
 
-    if (/眼轴(?!曲线|速度)|轴长|axial length|a\/l|\bal\b/.test(lower)) {
-      const axial = nums.filter((number) => number >= 18 && number <= 35);
-      assignBySide(values, sources, side, "axialRight", "axialLeft", axial, line);
+    const isMainHeader =
+      /\bal\b/.test(lower) &&
+      /\bct\b/.test(lower) &&
+      /\bad\b/.test(lower) &&
+      /\blt\b/.test(lower) &&
+      /\bvt\b/.test(lower);
+
+    if (isMainHeader) {
+      const valueLine = findNextNumericLine(lines, i + 1, 8);
+
+      if (valueLine) {
+        const nums = extractNumbers(valueLine);
+
+        // 并排两个表：前 5 个数字是左框 = 右眼，后 5 个数字是右框 = 左眼
+        if (nums.length >= 10) {
+          assignExact(values, sources, "axialRight", nums[0], valueLine);
+          assignExact(values, sources, "cornealThicknessRight", normalizeCornealThickness(nums[1]), valueLine);
+          assignExact(values, sources, "anteriorChamberDepthRight", nums[2], valueLine);
+          assignExact(values, sources, "lensThicknessRight", nums[3], valueLine);
+          assignExact(values, sources, "vitreousChamberLengthRight", nums[4], valueLine);
+
+          assignExact(values, sources, "axialLeft", nums[5], valueLine);
+          assignExact(values, sources, "cornealThicknessLeft", normalizeCornealThickness(nums[6]), valueLine);
+          assignExact(values, sources, "anteriorChamberDepthLeft", nums[7], valueLine);
+          assignExact(values, sources, "lensThicknessLeft", nums[8], valueLine);
+          assignExact(values, sources, "vitreousChamberLengthLeft", nums[9], valueLine);
+        }
+
+        // 只有一个表时：根据附近文字判断左右眼
+        else if (nums.length >= 5) {
+          const side = detectSideAround(lines, i);
+
+          if (side === "left") {
+            assignExact(values, sources, "axialLeft", nums[0], valueLine);
+            assignExact(values, sources, "cornealThicknessLeft", normalizeCornealThickness(nums[1]), valueLine);
+            assignExact(values, sources, "anteriorChamberDepthLeft", nums[2], valueLine);
+            assignExact(values, sources, "lensThicknessLeft", nums[3], valueLine);
+            assignExact(values, sources, "vitreousChamberLengthLeft", nums[4], valueLine);
+          } else {
+            assignExact(values, sources, "axialRight", nums[0], valueLine);
+            assignExact(values, sources, "cornealThicknessRight", normalizeCornealThickness(nums[1]), valueLine);
+            assignExact(values, sources, "anteriorChamberDepthRight", nums[2], valueLine);
+            assignExact(values, sources, "lensThicknessRight", nums[3], valueLine);
+            assignExact(values, sources, "vitreousChamberLengthRight", nums[4], valueLine);
+          }
+        }
+      }
     }
 
-    if (/\bct\b|\bcct\b|角膜厚度|corneal thickness|pachy/.test(lower)) {
-      const thickness = nums
-        .map(normalizeCornealThickness)
-        .filter((number) => number >= 300 && number <= 800);
-      assignBySide(values, sources, side, "cornealThicknessRight", "cornealThicknessLeft", thickness, line);
-    }
+    const isKHeader =
+      /al\/cr/i.test(line) &&
+      /\bk\s*1\b/i.test(line) &&
+      /\bk\s*2\b/i.test(line);
 
-    if (/\bad\b|\bacd\b|前房深度|前房|anterior chamber|aqueous depth/.test(lower)) {
-      const depths = nums.filter((number) => number >= 1.5 && number <= 6);
-      assignBySide(values, sources, side, "anteriorChamberDepthRight", "anteriorChamberDepthLeft", depths, line);
-    }
+    if (isKHeader) {
+      const valueLine = findNextNumericLine(lines, i + 1, 8);
 
-    if (/\blt\b|晶状体厚度|晶体厚度|lens thickness/.test(lower)) {
-      const thickness = nums.filter((number) => number >= 2 && number <= 7);
-      assignBySide(values, sources, side, "lensThicknessRight", "lensThicknessLeft", thickness, line);
-    }
+      if (valueLine) {
+        const kPairs = extractKPairs(valueLine);
 
-    if (/\bvt\b|玻璃体腔|玻璃体|vitreous/.test(lower)) {
-      const lengths = nums.filter((number) => number >= 10 && number <= 25);
-      assignBySide(values, sources, side, "vitreousChamberLengthRight", "vitreousChamberLengthLeft", lengths, line);
-    }
+        // 并排两个表：前两个 K pair 是右眼，后两个 K pair 是左眼
+        if (kPairs.length >= 4) {
+          assignExact(values, sources, "k1Right", kPairs[0], valueLine);
+          assignExact(values, sources, "k2Right", kPairs[1], valueLine);
+          assignExact(values, sources, "k1Left", kPairs[2], valueLine);
+          assignExact(values, sources, "k2Left", kPairs[3], valueLine);
+        }
 
-    if (/\bk\s*1\b|角膜曲率|keratometry|corneal curvature/.test(lower)) {
-      const kValues = nums.filter((number) => number >= 30 && number <= 60);
-      assignBySide(values, sources, side, "k1Right", "k1Left", kValues, line);
-    }
+        else if (kPairs.length >= 2) {
+          const side = detectSideAround(lines, i);
 
-    if (/\bk\s*2\b|角膜曲率|keratometry|corneal curvature/.test(lower)) {
-      const kValues = nums.filter((number) => number >= 30 && number <= 60);
-      assignBySide(values, sources, side, "k2Right", "k2Left", kValues, line);
+          if (side === "left") {
+            assignExact(values, sources, "k1Left", kPairs[0], valueLine);
+            assignExact(values, sources, "k2Left", kPairs[1], valueLine);
+          } else {
+            assignExact(values, sources, "k1Right", kPairs[0], valueLine);
+            assignExact(values, sources, "k2Right", kPairs[1], valueLine);
+          }
+        }
+      }
     }
+  }
+}
 
-    if (/屈光速度|度\/年|d\/y|diopter.*year|refraction.*rate/.test(lower)) {
-      const speeds = nums.map(normalizeDiopterLike).filter((number) => number >= -5 && number <= 5);
-      assignBySide(values, sources, side, "refractionVelocityRight", "refractionVelocityLeft", speeds, line);
-    } else if (!hasKData && /屈光|球镜|等效|近视|远视|se\b|spherical|diopter|\bd\b|度/.test(lower)) {
-      const refractions = nums.map(normalizeDiopterLike).filter((number) => number >= -30 && number <= 30);
-      assignBySide(values, sources, side, "refractionRight", "refractionLeft", refractions, line);
-    }
+function extractNonTableValues(lines, values, sources) {
+  lines.forEach((line) => {
+    const lower = line.toLowerCase();
+    const nums = extractNumbers(line);
+
+    if (nums.length === 0) return;
+
+    const side = detectSide(line);
 
     if (/眼轴速度|毫米\/年|mm\/y|mm\/year|axial.*rate|axial.*speed/.test(lower)) {
       const speeds = nums.filter((number) => number >= -5 && number <= 5);
       assignBySide(values, sources, side, "axialVelocityRight", "axialVelocityLeft", speeds, line);
+      return;
+    }
+
+    if (/屈光速度|度\/年|d\/y|diopter.*year|refraction.*rate/.test(lower)) {
+      const speeds = nums
+        .map(normalizeDiopterLike)
+        .filter((number) => number >= -5 && number <= 5);
+
+      assignBySide(values, sources, side, "refractionVelocityRight", "refractionVelocityLeft", speeds, line);
+      return;
+    }
+
+    const hasKData = /\bk\s*[12]\b|角膜曲率|keratometry|corneal curvature/i.test(line);
+
+    if (!hasKData && /屈光|球镜|等效|近视|远视|se\b|spherical|diopter|\bd\b|度/i.test(line)) {
+      const refractions = nums
+        .map(normalizeDiopterLike)
+        .filter((number) => number >= -30 && number <= 30);
+
+      assignBySide(values, sources, side, "refractionRight", "refractionLeft", refractions, line);
     }
   });
+}
 
-  return { values, sources };
+function findNextNumericLine(lines, startIndex, maxLookAhead = 6) {
+  for (let index = startIndex; index < Math.min(lines.length, startIndex + maxLookAhead); index += 1) {
+    const line = lines[index];
+    const nums = extractNumbers(line);
+
+    if (nums.length >= 2) {
+      return line;
+    }
+  }
+
+  return "";
+}
+
+function detectSideAround(lines, index) {
+  const nearby = [
+    lines[index - 3],
+    lines[index - 2],
+    lines[index - 1],
+    lines[index],
+    lines[index + 1],
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return detectSide(nearby);
+}
+
+function extractKPairs(line) {
+  return [...line.matchAll(/(\d{2}(?:[.,]\d+)?)\s*\/\s*\d{1,3}/g)]
+    .map((match) => Number(match[1].replace(",", ".")))
+    .filter(Number.isFinite);
+}
+
+function assignExact(values, sources, key, value, sourceLine) {
+  if (!Number.isFinite(value)) return;
+  if (values[key] != null) return;
+
+  values[key] = value;
+  sources[key] = sourceLine;
+}
+
+function extractTableValues(lines, values, sources) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const lower = line.toLowerCase();
+
+    const isBiometryHeader =
+      /\bal\b/.test(lower) &&
+      /\bct\b/.test(lower) &&
+      /\bad\b/.test(lower) &&
+      /\blt\b/.test(lower) &&
+      /\bvt\b/.test(lower);
+
+    if (isBiometryHeader) {
+      const valueLine = findNextNumericLine(lines, index + 1);
+      if (valueLine) {
+        const side = detectSideAround(lines, index);
+        const nums = extractNumbers(valueLine);
+
+        if (nums.length >= 5) {
+          assignTableValue(values, sources, side, "axialRight", "axialLeft", nums[0], valueLine);
+          assignTableValue(values, sources, side, "cornealThicknessRight", "cornealThicknessLeft", normalizeCornealThickness(nums[1]), valueLine);
+          assignTableValue(values, sources, side, "anteriorChamberDepthRight", "anteriorChamberDepthLeft", nums[2], valueLine);
+          assignTableValue(values, sources, side, "lensThicknessRight", "lensThicknessLeft", nums[3], valueLine);
+          assignTableValue(values, sources, side, "vitreousChamberLengthRight", "vitreousChamberLengthLeft", nums[4], valueLine);
+        }
+      }
+    }
+
+    const isKHeader =
+      /al\/cr/i.test(line) &&
+      /\bk\s*1\b/i.test(line) &&
+      /\bk\s*2\b/i.test(line);
+
+    if (isKHeader) {
+      const valueLine = findNextNumericLine(lines, index + 1);
+      if (valueLine) {
+        const side = detectSideAround(lines, index);
+        const kValues = extractKValues(valueLine);
+
+        if (kValues.k1 != null) {
+          assignTableValue(values, sources, side, "k1Right", "k1Left", kValues.k1, valueLine);
+        }
+
+        if (kValues.k2 != null) {
+          assignTableValue(values, sources, side, "k2Right", "k2Left", kValues.k2, valueLine);
+        }
+      }
+    }
+  }
+}
+
+function extractLineValues(lines, values, sources) {
+  lines.forEach((line) => {
+    const lower = line.toLowerCase();
+    const side = detectSide(line);
+
+    if (/眼轴速度|毫米\/年|mm\/y|mm\/year|axial.*rate|axial.*speed/.test(lower)) {
+      const nums = extractNumbers(line).filter((number) => number >= -5 && number <= 5);
+      assignBySide(values, sources, side, "axialVelocityRight", "axialVelocityLeft", nums, line);
+      return;
+    }
+
+    if (/屈光速度|度\/年|d\/y|diopter.*year|refraction.*rate/.test(lower)) {
+      const nums = extractNumbers(line)
+        .map(normalizeDiopterLike)
+        .filter((number) => number >= -5 && number <= 5);
+      assignBySide(values, sources, side, "refractionVelocityRight", "refractionVelocityLeft", nums, line);
+      return;
+    }
+
+    const hasKData = /\bk\s*[12]\b|角膜曲率|keratometry|corneal curvature/i.test(line);
+
+    if (!hasKData && /屈光|球镜|等效|近视|远视|se\b|spherical|diopter|\bd\b|度/i.test(line)) {
+      const nums = extractNumbers(line)
+        .map(normalizeDiopterLike)
+        .filter((number) => number >= -30 && number <= 30);
+      assignBySide(values, sources, side, "refractionRight", "refractionLeft", nums, line);
+    }
+  });
+}
+
+function findNextNumericLine(lines, startIndex) {
+  for (let index = startIndex; index < Math.min(lines.length, startIndex + 4); index += 1) {
+    const line = lines[index];
+    const nums = extractNumbers(line);
+
+    if (nums.length >= 2) {
+      return line;
+    }
+  }
+
+  return "";
+}
+
+function detectSideAround(lines, index) {
+  const nearby = [
+    lines[index - 3],
+    lines[index - 2],
+    lines[index - 1],
+    lines[index],
+    lines[index + 1],
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return detectSide(nearby);
+}
+
+function assignTableValue(values, sources, side, rightKey, leftKey, value, sourceLine) {
+  if (!Number.isFinite(value)) return;
+
+  if (side === "right" && values[rightKey] == null) {
+    values[rightKey] = value;
+    sources[rightKey] = sourceLine;
+    return;
+  }
+
+  if (side === "left" && values[leftKey] == null) {
+    values[leftKey] = value;
+    sources[leftKey] = sourceLine;
+    return;
+  }
+
+  if (side === "both") {
+    if (values[rightKey] == null) {
+      values[rightKey] = value;
+      sources[rightKey] = sourceLine;
+    } else if (values[leftKey] == null) {
+      values[leftKey] = value;
+      sources[leftKey] = sourceLine;
+    }
+  }
+}
+
+function extractKValues(line) {
+  const pairMatches = [...line.matchAll(/(\d{2}(?:[.,]\d+)?)\s*\/\s*\d{1,3}/g)].map((match) =>
+    Number(match[1].replace(",", ".")),
+  );
+
+  return {
+    k1: Number.isFinite(pairMatches[0]) ? pairMatches[0] : null,
+    k2: Number.isFinite(pairMatches[1]) ? pairMatches[1] : null,
+  };
 }
 
 function normalizeOcrLine(line) {
@@ -798,48 +1238,69 @@ function parseUserNumber(value) {
 }
 
 function calculateAverages() {
+  return calculateAveragesWithCounts().averages;
+}
+
+function calculateAveragesWithCounts() {
   const averages = {};
+  const counts = {};
+
   Object.keys(metricDefs).forEach((key) => {
     const nums = pendingReadings
       .map((reading) => reading.values[key])
       .filter((value) => Number.isFinite(value));
+
     if (nums.length > 0) {
       const sum = nums.reduce((total, value) => total + value, 0);
       averages[key] = sum / nums.length;
+      counts[key] = nums.length;
     }
   });
-  return averages;
+
+  return { averages, counts };
 }
 
+
 function updateAverageSummary() {
-  const averages = calculateAverages();
+  const { averages, counts } = calculateAveragesWithCounts();
   const entries = Object.entries(averages);
+
   els.saveRecordButton.disabled = entries.length === 0;
+
   if (entries.length === 0) {
     els.averageSummary.textContent = "还没有可保存的数据";
     return;
   }
+
   els.averageSummary.textContent = entries
-    .map(([key, value]) => `${metricDefs[key].label} ${formatMetricValue(key, value)}`)
+    .map(([key, value]) => {
+      const count = counts[key] || 0;
+      return `${metricDefs[key].label} ${formatMetricValue(key, value)}（n=${count}）`;
+    })
     .join(" · ");
 }
 
 async function saveCurrentRecord() {
-  const averages = calculateAverages();
+  const { averages, counts } = calculateAveragesWithCounts();
+
   if (Object.keys(averages).length === 0 || !activeProfileId) return;
+
   const record = {
     id: crypto.randomUUID(),
     profileId: activeProfileId,
     capturedAt: new Date(els.capturedAtInput.value || Date.now()).toISOString(),
     createdAt: new Date().toISOString(),
     averages,
+    counts,
     readings: pendingReadings.map((reading) => ({
       fileName: reading.fileName,
+      sourceImageName: reading.sourceImageName || reading.fileName,
       text: reading.text,
       values: reading.values,
       status: reading.status,
     })),
   };
+
   await putItem(STORE_RECORDS, record);
   clearUploads();
   setDefaultCapturedAt();
