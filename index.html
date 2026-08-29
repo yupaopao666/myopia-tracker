@@ -43,25 +43,64 @@
           检查时间
           <input id="capturedAtInput" type="datetime-local" />
         </label>
-
-        <button id="manualEntryButton" type="button">手动录入</button>
-        <button id="addRecordButton" type="button">新增 record</button>
       </div>
 
-      <div class="upload-zone" id="uploadZone">
-        <input id="imageInput" class="file-input" type="file" accept="image/*" multiple />
-        <span class="upload-icon">+</span>
-        <span>选择 1 张或多张图片</span>
-        <button id="chooseImageButton" class="secondary-button compact" type="button">选择图片</button>
-        <small>也可以把图片拖到这里</small>
-      </div>
+      <div class="json-import-panel">
+  <label for="jsonInput">
+    粘贴 JSON
+  </label>
 
-      <div class="actions">
-        <button id="analyzeButton" type="button" disabled>分析图片</button>
-        <button id="clearUploadsButton" type="button">清空</button>
-      </div>
+  <textarea
+    id="jsonInput"
+    rows="10"
+    placeholder='[
+  {
+    "measurement_time": "2026-06-03 11:46:08",
+    "right_eye": {
+      "AL": 24.55
+    },
+    "left_eye": {
+      "AL": 24.55
+    }
+  }
+]'
+  ></textarea>
 
-      <p id="ocrStatus">等待上传图片</p>
+  <div class="json-divider">
+    或
+  </div>
+
+  <input
+    id="jsonFileInput"
+    class="file-input"
+    type="file"
+    accept=".json,application/json"
+  />
+
+  <button
+    id="chooseJsonButton"
+    class="secondary-button"
+    type="button"
+  >
+    选择 JSON 文件
+  </button>
+
+  <span id="jsonFileName"></span>
+</div>
+
+<div class="actions">
+  <button id="importJsonButton" type="button">
+    导入 JSON
+  </button>
+
+  <button id="clearUploadsButton" type="button">
+    清空
+  </button>
+</div>
+
+<p id="importStatus">
+  粘贴 JSON 或选择 JSON 文件
+</p>
 
       <div id="uploadList"></div>
 
@@ -71,7 +110,7 @@
 
   <div class="actions">
     <button id="calculateButton" type="button" disabled>计算平均值</button>
-    <button id="saveRecordButton" type="button" disabled>保存 data point</button>
+    <button id="saveRecordButton" type="button" disabled>保存数据</button>
   </div>
 </section>
     </section>
@@ -89,7 +128,9 @@
   <button class="metric-tab" data-chart-metric="kappa" type="button">Kappa</button>
 </div>
 
-      <canvas id="trendCanvas" width="900" height="420"></canvas>
+<div class="trend-chart-container">
+  <canvas id="trendCanvas"></canvas>
+</div>
       <p id="emptyTrendMessage">当前用户还没有记录</p>
     </section>
 

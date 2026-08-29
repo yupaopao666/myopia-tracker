@@ -1,15 +1,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+
 import {
-  getFirestore,
-  collection,
-  doc,
-  getDocs,
-  setDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  getDatabase,
+  ref,
+  get,
+  set,
+  remove,
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
 
 const firebaseConfig = {
         apiKey: "AIzaSyDLxCEmP3RchhEwjRULu0ELMg_iLItBfkw",
@@ -23,23 +20,23 @@ const firebaseConfig = {
 
 
 const firebaseApp = initializeApp(firebaseConfig);
-const firestoreDb = getFirestore(firebaseApp);
+const realtimeDb = getDatabase(firebaseApp);
 
-const DB_NAME = "myopia-tracker-db";
-const DB_VERSION = 1;
 const STORE_PROFILES = "profiles";
 const STORE_RECORDS = "records";
 
-let db;
+const MYOPIA_ROOT = "myopiaTracker";
+
 let profiles = [];
 let activeProfileId = null;
 let pendingReadings = [];
 let records = [];
 let currentChartMetric = "axial";
 let chart;
+
 let currentAverages = {};
 let currentCounts = {};
-let trendChart = null;
+let saveMode = "individual";
 
 const metricDefs = {
   axialRight: { label: "AL 眼轴", eye: "右眼", unit: "mm" },
@@ -128,117 +125,114 @@ const metricRows = [
 ];
 
 
-const metricOrder = Object.keys(metricDefs);
-
 const els = {
   profileSelect: document.querySelector("#profileSelect"),
   profileNameInput: document.querySelector("#profileNameInput"),
   createProfileButton: document.querySelector("#createProfileButton"),
   capturedAtInput: document.querySelector("#capturedAtInput"),
-  manualEntryButton: document.querySelector("#manualEntryButton"),
-  imageInput: document.querySelector("#imageInput"),
-  uploadZone: document.querySelector("#uploadZone"),
-  chooseImageButton: document.querySelector("#chooseImageButton"),
-  analyzeButton: document.querySelector("#analyzeButton"),
-  clearUploadsButton: document.querySelector("#clearUploadsButton"),
-  ocrStatus: document.querySelector("#ocrStatus"),
+  jsonInput: document.querySelector("#jsonInput"),
+  jsonFileInput: document.querySelector("#jsonFileInput"),
+  chooseJsonButton: document.querySelector("#chooseJsonButton"),
+  jsonFileName: document.querySelector("#jsonFileName"),
+  importJsonButton: document.querySelector("#importJsonButton"),
+  importStatus: document.querySelector("#importStatus"),
   uploadList: document.querySelector("#uploadList"),
   averageSummary: document.querySelector("#averageSummary"),
-  calculateButton: document.querySelector("#calculateButton"),
   saveRecordButton: document.querySelector("#saveRecordButton"),
   readingTemplate: document.querySelector("#readingTemplate"),
   recordsList: document.querySelector("#recordsList"),
   emptyTrendMessage: document.querySelector("#emptyTrendMessage"),
   trendCanvas: document.querySelector("#trendCanvas"),
-  exportButton: document.querySelector("#exportButton"),
-  importInput: document.querySelector("#importInput"),
-  deleteProfileButton: document.querySelector("#deleteProfileButton"),
-  addRecordButton: document.querySelector("#addRecordButton"),
+  clearUploadsButton: document.querySelector("#clearUploadsButton"),
+  calculateButton: document.querySelector("#calculateButton"),
 };
 
 init();
 
 async function init() {
-  db = await openDb();
   bindEvents();
   setDefaultCapturedAt();
   await loadProfiles();
   await loadRecords();
   renderAll();
 }
-
 function bindEvents() {
-  els.createProfileButton.addEventListener("click", createProfile);
+  els.createProfileButton.addEventListener(
+    "click",
+    createProfile
+  );
 
-  els.profileSelect.addEventListener("change", async () => {
-    activeProfileId = els.profileSelect.value || null;
-    localStorage.setItem("activeProfileId", activeProfileId || "");
-    await loadRecords();
-    renderAll();
-  });
+  els.profileSelect.addEventListener(
+    "change",
+    async () => {
+      activeProfileId =
+        els.profileSelect.value || null;
 
-  els.chooseImageButton.addEventListener("click", () => {
-    els.imageInput.click();
-  });
+      localStorage.setItem(
+        "activeProfileId",
+        activeProfileId || ""
+      );
 
-  els.uploadZone.addEventListener("click", (event) => {
-    if (event.target === els.chooseImageButton) return;
-    els.imageInput.click();
-  });
+      await loadRecords();
+      renderAll();
+    }
+  );
 
-  els.imageInput.addEventListener("change", () => {
-    const files = Array.from(els.imageInput.files || []);
-    addFiles(files);
-    els.imageInput.value = "";
-  });
+  els.calculateButton.addEventListener(
+  "click",
+  calculateAndShowAverage
+);
 
-  els.addRecordButton.addEventListener("click", addManualReading);
+  els.saveRecordButton.addEventListener(
+    "click",
+    saveCurrentRecord
+  );
 
-  els.uploadZone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    els.uploadZone.classList.add("drag-over");
-  });
-
-  els.uploadZone.addEventListener("dragleave", () => {
-    els.uploadZone.classList.remove("drag-over");
-  });
-
-  els.uploadZone.addEventListener("drop", (event) => {
-    event.preventDefault();
-    els.uploadZone.classList.remove("drag-over");
-    addFiles(Array.from(event.dataTransfer?.files || []));
-  });
-
-  els.analyzeButton.addEventListener("click", analyzePendingImages);
-  els.clearUploadsButton.addEventListener("click", clearUploads);
-  els.manualEntryButton.addEventListener("click", addManualReading);
-  els.calculateButton.addEventListener("click", calculateAndShowAverage);
-  els.saveRecordButton.addEventListener("click", saveCurrentRecord);
+  els.clearUploadsButton.addEventListener(
+  "click",
+  clearUploads
+);
 
   document.querySelectorAll(".tab").forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.tab));
+    button.addEventListener(
+      "click",
+      () => switchTab(button.dataset.tab)
+    );
   });
 
-  document.querySelectorAll(".metric-tab").forEach((button) => {
-    button.addEventListener("click", () => {
-      currentChartMetric = button.dataset.chartMetric;
-      document.querySelectorAll(".metric-tab").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      renderChart();
+  document
+    .querySelectorAll(".metric-tab")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        currentChartMetric =
+          button.dataset.chartMetric;
+
+        document
+          .querySelectorAll(".metric-tab")
+          .forEach((item) =>
+            item.classList.remove("active")
+          );
+
+        button.classList.add("active");
+        renderChart();
+      });
     });
-  });
-}
-
-async function openDb() {
-  return firestoreDb;
 }
 
 async function getAll(storeName) {
-  const snapshot = await getDocs(collection(firestoreDb, storeName));
+  const snapshot = await get(
+    ref(realtimeDb, `${MYOPIA_ROOT}/${storeName}`)
+  );
 
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...item.data(),
+  if (!snapshot.exists()) {
+    return [];
+  }
+
+  const data = snapshot.val();
+
+  return Object.entries(data).map(([id, value]) => ({
+    id,
+    ...value,
   }));
 }
 
@@ -247,20 +241,27 @@ async function putItem(storeName, item) {
     item.id = crypto.randomUUID();
   }
 
-  await setDoc(doc(firestoreDb, storeName, item.id), item);
+  await set(
+    ref(
+      realtimeDb,
+      `${MYOPIA_ROOT}/${storeName}/${item.id}`
+    ),
+    item
+  );
+
+  return item;
 }
 
 async function deleteItem(storeName, id) {
-  await deleteDoc(doc(firestoreDb, storeName, id));
+  await remove(
+    ref(
+      realtimeDb,
+      `${MYOPIA_ROOT}/${storeName}/${id}`
+    )
+  );
 }
 
-async function loadProfiles() {
-  profiles = await getAll(STORE_PROFILES);
-  const savedActive = localStorage.getItem("activeProfileId");
-  activeProfileId = profiles.some((profile) => profile.id === savedActive)
-    ? savedActive
-    : profiles[0]?.id || null;
-}
+
 
 async function loadRecords() {
   if (!activeProfileId) {
@@ -268,23 +269,20 @@ async function loadRecords() {
     return;
   }
 
-  const recordsQuery = query(
-    collection(firestoreDb, STORE_RECORDS),
-    where("profileId", "==", activeProfileId),
-    orderBy("capturedAt", "asc"),
-  );
+  const allRecords = await getAll(STORE_RECORDS);
 
-  const snapshot = await getDocs(recordsQuery);
-
-  records = snapshot.docs.map((item) => ({
-    id: item.id,
-    ...item.data(),
-  }));
+  records = allRecords
+    .filter(
+      record => record.profileId === activeProfileId
+    )
+    .sort((a, b) =>
+      String(a.capturedAt || "")
+        .localeCompare(
+          String(b.capturedAt || "")
+        )
+    );
 }
-
 async function createProfile() {
-  console.log("createProfile clicked");
-
   const name = els.profileNameInput.value.trim();
 
   if (!name) {
@@ -307,13 +305,14 @@ async function createProfile() {
 
     els.profileNameInput.value = "";
     activeProfileId = profile.id;
+
     localStorage.setItem("activeProfileId", activeProfileId);
 
     await loadProfiles();
     await loadRecords();
+
     renderAll();
 
-    console.log("profile created", profile);
   } catch (error) {
     console.error("Create profile failed:", error);
     alert(`创建用户失败：${error.message || error}`);
@@ -327,247 +326,6 @@ function setDefaultCapturedAt() {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   els.capturedAtInput.value = now.toISOString().slice(0, 16);
-}
-
-function addFiles(files) {
-  const imageFiles = files.filter((file) => {
-    const isImageType = file.type && file.type.startsWith("image/");
-    const isImageName = /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(file.name || "");
-    return isImageType || isImageName;
-  });
-
-  if (imageFiles.length === 0) {
-    els.ocrStatus.textContent = "没有读取到图片文件";
-    return;
-  }
-
-  imageFiles.forEach((file) => {
-    pendingReadings.push({
-      id: crypto.randomUUID(),
-      fileName: file.name || `图片 ${pendingReadings.length + 1}`,
-      file,
-      previewUrl: URL.createObjectURL(file),
-      status: "new",
-      text: "",
-      values: {},
-      sources: {},
-    });
-  });
-
-  els.ocrStatus.textContent = `已添加 ${imageFiles.length} 张图片，请点击“分析图片”`;
-  renderUploads();
-}
-
-function addManualReading() {
-  pendingReadings.push({
-    id: crypto.randomUUID(),
-    fileName: `手动录入 ${pendingReadings.length + 1}`,
-    file: null,
-    previewUrl: "",
-    status: "manual",
-    text: "",
-    values: {},
-    sources: {},
-  });
-  renderUploads();
-}
-
-async function analyzePendingImages() {
-  const imageReadings = pendingReadings.filter((reading) => reading.file);
-  if (imageReadings.length === 0) return;
-
-  els.analyzeButton.disabled = true;
-  els.calculateButton.disabled = true;
-  els.saveRecordButton.disabled = true;
-
-  const existingReadings = pendingReadings.filter((reading) => !reading.file);
-  const nextReadings = [...existingReadings];
-
-  for (const reading of imageReadings) {
-    reading.status = "processing";
-    renderUploads();
-
-    let text = "";
-
-    try {
-      els.ocrStatus.textContent = `正在分析 ${reading.fileName}`;
-
-      const result = await Tesseract.recognize(reading.file, "eng+chi_sim", {
-        logger: (message) => {
-          if (message.status === "recognizing text" && message.progress) {
-            els.ocrStatus.textContent = `正在分析 ${reading.fileName}: ${Math.round(message.progress * 100)}%`;
-          }
-        },
-      });
-
-      text = result.data.text || "";
-      console.log("OCR TEXT:", text);
-    } catch (error) {
-      console.error("OCR failed:", error);
-      text = `OCR 失败: ${error.message || error}\n请手动填写表格。`;
-    }
-
-    const guessedRecords = extractTwoEditableRecordsFromOcr(text);
-
-    // 每张图片默认生成 2 条 record
-    for (let recordIndex = 0; recordIndex < 2; recordIndex += 1) {
-      nextReadings.push({
-        id: crypto.randomUUID(),
-        fileName: `${reading.fileName} · record ${recordIndex + 1}`,
-        file: null,
-        previewUrl: reading.previewUrl,
-        sourceImageName: reading.fileName,
-        status: "review",
-        text,
-        values: guessedRecords[recordIndex] || {},
-        sources: {},
-      });
-    }
-  }
-
-  pendingReadings = nextReadings;
-  currentAverages = {};
-  currentCounts = {};
-
-  els.ocrStatus.textContent = "已生成可编辑表格，请校对后点击“计算平均值”";
-  renderUploads();
-}
-
-function extractTwoEditableRecordsFromOcr(text) {
-  const records = [{}, {}];
-
-  const lines = String(text)
-    .split(/\n+/)
-    .map((line) => normalizeEditableOcrLine(line))
-    .filter(Boolean);
-
-  const numericLines = lines.filter((line) => extractNumbers(line).length >= 2);
-
-  let recordIndex = 0;
-
-  numericLines.forEach((line) => {
-    const nums = extractNumbers(line);
-    const kPairs = extractKPairs(line);
-
-    // 尝试预填 AL / AD / LT / VT
-    const axial = nums.find((num) => num >= 20 && num <= 30);
-    const ct = nums.find((num) => num >= 450 && num <= 700);
-    const smallNums = nums.filter((num) => num >= 2.5 && num <= 5);
-    const vtCandidates = nums.filter((num) => num >= 14 && num <= 20);
-    const vt = vtCandidates.at(-1);
-
-    if (axial != null || vt != null) {
-      const target = records[Math.min(recordIndex, 1)];
-
-      if (axial != null) target.axialRight = axial;
-      if (ct != null) target.cornealThicknessRight = ct;
-      if (smallNums[0] != null) target.anteriorChamberDepthRight = smallNums[0];
-      if (smallNums[1] != null) target.lensThicknessRight = smallNums[1];
-      if (vt != null) target.vitreousChamberLengthRight = vt;
-
-      recordIndex += 1;
-      return;
-    }
-
-    // 尝试预填 AL/CR / K1 / K2 / Kappa
-    if (kPairs.length > 0) {
-      const target = records[Math.max(0, Math.min(recordIndex - 1, 1))];
-
-      const alCr = nums.find((num) => num >= 2.8 && num <= 3.5);
-      const kappa = nums.filter((num) => num > 0 && num < 10).at(-1);
-
-      if (alCr != null) target.alCrRight = alCr;
-      if (kPairs[0] != null) target.k1Right = kPairs[0];
-      if (kPairs[1] != null) target.k2Right = kPairs[1];
-      if (kappa != null) target.kappaRight = kappa;
-    }
-  });
-
-  return records;
-}
-
-function extractRecords(text) {
-  const blocks = splitRecordBlocks(text);
-  const records = [];
-
-  blocks.forEach((block, index) => {
-    const extraction = extractValues(block);
-
-    if (Object.keys(extraction.values).length > 0) {
-      records.push({
-        index,
-        text: block,
-        values: extraction.values,
-        sources: extraction.sources,
-      });
-    }
-  });
-
-  return { records };
-}
-
-function splitRecordBlocks(text) {
-  const lines = String(text)
-    .split(/\n+/)
-    .map((line) => normalizeOcrLineForRecords(line))
-    .filter(Boolean);
-
-  const blocks = [];
-  let current = [];
-  let tableHeaderCount = 0;
-
-  lines.forEach((line) => {
-    const lower = line.toLowerCase();
-
-    const isMeasurementTime = /测量时间|检查时间|measurement time|exam time/.test(lower);
-
-    const isTableHeader =
-      /\bal\b/.test(lower) &&
-      /\bct\b/.test(lower) &&
-      /\bad\b/.test(lower) &&
-      /\blt\b/.test(lower) &&
-      /\bvt\b/.test(lower);
-
-    const isWeakTableHeader =
-      /a\s*>?\s*vt/i.test(line) ||
-      /\bal\b.*\bvt\b/i.test(line) ||
-      /a\s+l\s+.*v\s*t/i.test(line);
-
-    const startsNewRecord =
-      isMeasurementTime ||
-      ((isTableHeader || isWeakTableHeader) && tableHeaderCount > 0 && current.length > 0);
-
-    if (startsNewRecord && current.length > 0) {
-      blocks.push(current.join("\n"));
-      current = [];
-    }
-
-    current.push(line);
-
-    if (isTableHeader || isWeakTableHeader) {
-      tableHeaderCount += 1;
-    }
-  });
-
-  if (current.length > 0) {
-    blocks.push(current.join("\n"));
-  }
-
-  return blocks.length > 0 ? blocks : [text];
-}
-
-function normalizeOcrLineForRecords(line) {
-  return String(line)
-    .replace(/,/g, ".")
-    .replace(/[|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function extractKPairs(line) {
-  return [...String(line).matchAll(/(\d{2}(?:[.,]\d+)?)\s*\/\s*\d{1,3}/g)]
-    .map((match) => Number(match[1].replace(",", ".")))
-    .filter(Number.isFinite);
 }
 
 function setValue(values, sources, key, value, sourceLine) {
@@ -608,7 +366,7 @@ function renderUploads() {
     const pre = node.querySelector("pre");
 
     title.textContent = reading.fileName;
-    status.textContent = statusText(reading.status);
+    status.textContent = "已导入";
 
     if (reading.previewUrl) {
       img.src = reading.previewUrl;
@@ -634,8 +392,11 @@ function renderUploads() {
     delete reading.values[key];
   }
 
+  // 数据改过以后，之前计算的平均值失效
   currentAverages = {};
   currentCounts = {};
+  saveMode = "individual";
+
   updateAverageSummary();
 });
     });
@@ -644,122 +405,7 @@ function renderUploads() {
     els.uploadList.appendChild(card);
   });
 
-  els.analyzeButton.disabled = !pendingReadings.some((reading) => reading.file);
   updateAverageSummary();
-}
-
-function extractRecordsForEditableTable(text) {
-  const blocks = splitOcrIntoPossibleRecords(text);
-  const records = [];
-
-  blocks.forEach((block, index) => {
-    const extraction = extractValuesForEditableTable(block);
-
-    records.push({
-      index,
-      text: block,
-      values: extraction.values,
-      sources: extraction.sources,
-    });
-  });
-
-  return { records };
-}
-
-function splitOcrIntoPossibleRecords(text) {
-  const lines = String(text)
-    .split(/\n+/)
-    .map((line) => normalizeEditableOcrLine(line))
-    .filter(Boolean);
-
-  const blocks = [];
-  let current = [];
-  let seenDataLine = false;
-
-  lines.forEach((line) => {
-    const nums = extractNumbers(line);
-    const hasAxial = nums.some((num) => num >= 20 && num <= 30);
-    const hasVt = nums.some((num) => num >= 14 && num <= 20);
-    const looksLikeNewRecord = hasAxial && hasVt && seenDataLine;
-
-    if (looksLikeNewRecord && current.length > 0) {
-      blocks.push(current.join("\n"));
-      current = [];
-      seenDataLine = false;
-    }
-
-    current.push(line);
-
-    if (hasAxial || hasVt || extractKPairs(line).length > 0) {
-      seenDataLine = true;
-    }
-  });
-
-  if (current.length > 0) {
-    blocks.push(current.join("\n"));
-  }
-
-  return blocks.length > 0 ? blocks : [String(text)];
-}
-
-function extractValuesForEditableTable(text) {
-  const values = {};
-  const sources = {};
-
-  const lines = String(text)
-    .split(/\n+/)
-    .map((line) => normalizeEditableOcrLine(line))
-    .filter(Boolean);
-
-  lines.forEach((line) => {
-    const nums = extractNumbers(line);
-    const kPairs = extractKPairs(line);
-
-    // K row:
-    // 右眼: AL/CR K1 K2 Kappa
-    // 左眼: AL/CR K1 K2 Kappa
-    //
-    // 理想 OCR:
-    // 3.16 42.88/158 44.00/68 0.9  3.15 42.93/178 43.83/88 0.9
-    if (kPairs.length > 0) {
-      parseEditableKLine(line, nums, kPairs, values, sources);
-      return;
-    }
-
-    // Biometry row:
-    // 右眼: AL CT AD LT VT
-    // 左眼: AL CT AD LT VT
-    //
-    // 理想 OCR:
-    // 24.54 555.00 3.17 3.61 17.20  24.54 558.00 3.18 3.62 17.18
-    parseEditableBiometryLine(line, nums, values, sources);
-  });
-
-  return { values, sources };
-}
-
-function parseEditableBiometryLine(line, nums, values, sources) {
-  if (nums.length < 2) return;
-
-  // 最理想情况：一行有左右眼两套完整数据，共 10 个数字
-  if (nums.length >= 10) {
-    assignBiometryGroup(values, sources, "Right", nums.slice(0, 5), line);
-    assignBiometryGroup(values, sources, "Left", nums.slice(5, 10), line);
-    return;
-  }
-
-  // 有时候 OCR 会把左右眼拆在不同行，或者只识别出一边
-  // 这里尽量判断这一行像不像一套 AL/CT/AD/LT/VT
-  const group = extractOneBiometryGroup(nums);
-
-  if (!group) return;
-
-  // 如果右眼还空，先填右眼；否则填左眼
-  if (values.axialRight == null) {
-    assignBiometryGroup(values, sources, "Right", group, line);
-  } else if (values.axialLeft == null) {
-    assignBiometryGroup(values, sources, "Left", group, line);
-  }
 }
 
 function assignBiometryGroup(values, sources, side, group, sourceLine) {
@@ -868,73 +514,6 @@ function normalizeEditableOcrLine(line) {
     .trim();
 }
 
-function extractValues(text) {
-  const values = {};
-  const sources = {};
-
-  const lines = String(text)
-    .split(/\n+/)
-    .map((line) => normalizeOcrLineForRecords(line))
-    .filter(Boolean);
-
-  const numericLines = lines.filter((line) => extractNumbers(line).length >= 2);
-
-  numericLines.forEach((line) => {
-    const nums = extractNumbers(line);
-    const kPairs = extractKPairs(line);
-
-    // K1 / K2 行，例如 42.99/164
-    if (kPairs.length > 0) {
-      assignNextEyeValue(values, sources, "k1Right", "k1Left", kPairs[0], line);
-
-      if (kPairs.length > 1) {
-        assignNextEyeValue(values, sources, "k2Right", "k2Left", kPairs[1], line);
-      }
-
-      const possibleKappa = nums.find((num) => num > 0 && num < 10 && !kPairs.includes(num));
-      if (possibleKappa != null) {
-        assignNextEyeValue(values, sources, "kappaRight", "kappaLeft", possibleKappa, line);
-      }
-
-      return;
-    }
-
-    // AL / CT / AD / LT / VT 行
-    // 理想行是：24.54 555.00 3.17 3.61 17.20
-    const axial = nums.find((num) => num >= 20 && num <= 30);
-    const ct = nums.find((num) => num >= 450 && num <= 700);
-    const smallNums = nums.filter((num) => num >= 2.5 && num <= 5);
-    const vt = nums.find((num) => num >= 14 && num <= 20);
-
-    if (axial != null) {
-      assignNextEyeValue(values, sources, "axialRight", "axialLeft", axial, line);
-    }
-
-    if (ct != null) {
-      assignNextEyeValue(values, sources, "cornealThicknessRight", "cornealThicknessLeft", ct, line);
-    }
-
-    if (smallNums.length >= 1) {
-      assignNextEyeValue(values, sources, "anteriorChamberDepthRight", "anteriorChamberDepthLeft", smallNums[0], line);
-    }
-
-    if (smallNums.length >= 2) {
-      assignNextEyeValue(values, sources, "lensThicknessRight", "lensThicknessLeft", smallNums[1], line);
-    }
-
-    if (vt != null) {
-      assignNextEyeValue(values, sources, "vitreousChamberLengthRight", "vitreousChamberLengthLeft", vt, line);
-    }
-
-    // AL/CR 通常在 3.x
-    const alCr = nums.find((num) => num >= 2.5 && num <= 4);
-    if (alCr != null) {
-      assignNextEyeValue(values, sources, "alCrRight", "alCrLeft", alCr, line);
-    }
-  });
-
-  return { values, sources };
-}
 
 function assignNextEyeValue(values, sources, rightKey, leftKey, value, sourceLine) {
   if (!Number.isFinite(value)) return;
@@ -948,144 +527,6 @@ function assignNextEyeValue(values, sources, rightKey, leftKey, value, sourceLin
   if (values[leftKey] == null) {
     values[leftKey] = value;
     sources[leftKey] = sourceLine;
-  }
-}
-
-function parseLooseBiometryLines(numericLines, values, sources) {
-  numericLines.forEach((line) => {
-    const nums = extractNumbers(line);
-    const kPairs = extractKPairs(line);
-
-    // K 值行，比如 3.16 42.99/164 ...
-    if (kPairs.length > 0) {
-      if (values.k1Right == null) {
-        values.k1Right = kPairs[0];
-        sources.k1Right = line;
-      } else if (values.k1Left == null) {
-        values.k1Left = kPairs[0];
-        sources.k1Left = line;
-      }
-
-      if (kPairs.length > 1) {
-        if (values.k2Right == null) {
-          values.k2Right = kPairs[1];
-          sources.k2Right = line;
-        } else if (values.k2Left == null) {
-          values.k2Left = kPairs[1];
-          sources.k2Left = line;
-        }
-      }
-
-      return;
-    }
-
-    // 生物测量行，需要至少有 AL 和 VT
-    const axialCandidates = nums.filter((num) => num >= 20 && num <= 30);
-    const vtCandidates = nums.filter((num) => num >= 14 && num <= 20);
-    const chamberCandidates = nums.filter((num) => num >= 2.5 && num <= 5);
-    const ctCandidates = nums.filter((num) => num >= 450 && num <= 700);
-
-    if (axialCandidates.length === 0 || vtCandidates.length === 0) return;
-
-    // 如果 OCR 只读出一个 24.xx，它大概率是左边/右边都同一个 AL
-    if (values.axialRight == null) {
-      values.axialRight = axialCandidates[0];
-      sources.axialRight = line;
-    } else if (values.axialLeft == null) {
-      values.axialLeft = axialCandidates[0];
-      sources.axialLeft = line;
-    }
-
-    // 如果这一行看起来是双眼同一横排，优先把同一个 AL 也填到左眼
-    if (values.axialLeft == null && axialCandidates.length === 1 && vtCandidates.length >= 1) {
-      values.axialLeft = axialCandidates[0];
-      sources.axialLeft = line;
-    }
-
-    if (ctCandidates.length > 0) {
-      if (values.cornealThicknessRight == null) {
-        values.cornealThicknessRight = ctCandidates[0];
-        sources.cornealThicknessRight = line;
-      } else if (values.cornealThicknessLeft == null) {
-        values.cornealThicknessLeft = ctCandidates[0];
-        sources.cornealThicknessLeft = line;
-      }
-    }
-
-    // OCR 里 AD/LT 经常只剩 3.62 这种一个值，不强行乱填两个
-    if (chamberCandidates.length >= 1) {
-      if (values.lensThicknessLeft == null) {
-        values.lensThicknessLeft = chamberCandidates[chamberCandidates.length - 1];
-        sources.lensThicknessLeft = line;
-      }
-    }
-
-    // VT 取最后一个 17.xx
-    const vtValue = vtCandidates[vtCandidates.length - 1];
-
-    if (values.vitreousChamberLengthRight == null) {
-      values.vitreousChamberLengthRight = vtValue;
-      sources.vitreousChamberLengthRight = line;
-    } else if (values.vitreousChamberLengthLeft == null) {
-      values.vitreousChamberLengthLeft = vtValue;
-      sources.vitreousChamberLengthLeft = line;
-    }
-
-    // 如果只有一个 VT，但这一行明显是双眼横排，先填左眼，避免完全空
-    if (values.vitreousChamberLengthLeft == null && vtCandidates.length >= 1) {
-      values.vitreousChamberLengthLeft = vtValue;
-      sources.vitreousChamberLengthLeft = line;
-    }
-  });
-}
-
-function parseStandardTableLines(lines, values, sources) {
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].toLowerCase();
-
-    const isHeader =
-      /\bal\b/.test(line) &&
-      /\bct\b/.test(line) &&
-      /\bad\b/.test(line) &&
-      /\blt\b/.test(line) &&
-      /\bvt\b/.test(line);
-
-    if (isHeader) {
-      const valueLine = findNextNumericLine(lines, i + 1);
-      const nums = extractNumbers(valueLine);
-
-      if (nums.length >= 10) {
-        setValueIfEmpty(values, sources, "axialRight", nums[0], valueLine);
-        setValueIfEmpty(values, sources, "cornealThicknessRight", nums[1], valueLine);
-        setValueIfEmpty(values, sources, "anteriorChamberDepthRight", nums[2], valueLine);
-        setValueIfEmpty(values, sources, "lensThicknessRight", nums[3], valueLine);
-        setValueIfEmpty(values, sources, "vitreousChamberLengthRight", nums[4], valueLine);
-
-        setValueIfEmpty(values, sources, "axialLeft", nums[5], valueLine);
-        setValueIfEmpty(values, sources, "cornealThicknessLeft", nums[6], valueLine);
-        setValueIfEmpty(values, sources, "anteriorChamberDepthLeft", nums[7], valueLine);
-        setValueIfEmpty(values, sources, "lensThicknessLeft", nums[8], valueLine);
-        setValueIfEmpty(values, sources, "vitreousChamberLengthLeft", nums[9], valueLine);
-      } else if (nums.length >= 5) {
-        setValueIfEmpty(values, sources, "axialRight", nums[0], valueLine);
-        setValueIfEmpty(values, sources, "cornealThicknessRight", nums[1], valueLine);
-        setValueIfEmpty(values, sources, "anteriorChamberDepthRight", nums[2], valueLine);
-        setValueIfEmpty(values, sources, "lensThicknessRight", nums[3], valueLine);
-        setValueIfEmpty(values, sources, "vitreousChamberLengthRight", nums[4], valueLine);
-      }
-    }
-
-    if (/al\/cr/i.test(line) && /\bk\s*1\b/i.test(line) && /\bk\s*2\b/i.test(line)) {
-      const valueLine = findNextNumericLine(lines, i + 1);
-      const pairs = extractKPairs(valueLine);
-
-      if (pairs.length >= 4) {
-        setValueIfEmpty(values, sources, "k1Right", pairs[0], valueLine);
-        setValueIfEmpty(values, sources, "k2Right", pairs[1], valueLine);
-        setValueIfEmpty(values, sources, "k1Left", pairs[2], valueLine);
-        setValueIfEmpty(values, sources, "k2Left", pairs[3], valueLine);
-      }
-    }
   }
 }
 
@@ -1156,118 +597,225 @@ function renderMetricInputs(container) {
   `;
 }
 
-function statusText(status) {
-  if (status === "new") return "待分析";
-  if (status === "processing") return "识别中";
-  if (status === "done") return "已识别";
-  if (status === "review") return "请校对";
-  if (status === "failed") return "识别失败";
-  if (status === "manual") return "手动";
-  return "待确认";
-}
+function calculateAndShowAverage() {
+  const averages = {};
+  const counts = {};
 
-function updateAverageSummary() {
-  const hasAnyValue = pendingReadings.some((reading) =>
-    Object.values(reading.values || {}).some((value) => Number.isFinite(value)),
-  );
+  Object.keys(metricDefs).forEach((key) => {
+    const values = pendingReadings
+      .map((reading) => reading.values?.[key])
+      .filter((value) => Number.isFinite(value));
 
-  els.calculateButton.disabled = !hasAnyValue;
-
-  if (Object.keys(currentAverages).length === 0) {
-    els.saveRecordButton.disabled = true;
-
-    if (!hasAnyValue) {
-      els.averageSummary.textContent = "还没有可计算的数据";
-    } else {
-      els.averageSummary.textContent = "已填写数据，请点击“计算平均值”";
+    if (!values.length) {
+      return;
     }
 
-    return;
-  }
+    averages[key] =
+      values.reduce(
+        (sum, value) => sum + value,
+        0
+      ) / values.length;
 
-  els.saveRecordButton.disabled = false;
+    counts[key] = values.length;
+  });
 
-  els.averageSummary.textContent = Object.entries(currentAverages)
-    .map(([key, value]) => {
-      const metric = metricDefs[key];
-      const count = currentCounts[key] || 0;
-      return `${metric.eye} ${metric.label}: ${formatMetricValue(value)} ${metric.unit}（n=${count}）`;
-    })
-    .join(" · ");
-}
+  currentAverages = averages;
+  currentCounts = counts;
 
-function calculateAndShowAverage() {
-  const result = calculateAveragesWithCounts();
-
-  currentAverages = result.averages;
-  currentCounts = result.counts;
+  saveMode = "average";
 
   updateAverageSummary();
 }
 
-function calculateAveragesWithCounts() {
-  const averages = {};
-  const counts = {};
+function updateAverageSummary() {
+  const hasAnyValue = pendingReadings.some((reading) =>
+    Object.values(reading.values || {}).some(
+      (value) => Number.isFinite(value)
+    )
+  );
 
-  metricOrder.forEach((key) => {
-    const nums = pendingReadings
-      .map((reading) => reading.values?.[key])
-      .filter((value) => Number.isFinite(value));
+  els.calculateButton.disabled = !hasAnyValue;
+  els.saveRecordButton.disabled = !hasAnyValue;
 
-    if (nums.length > 0) {
-      averages[key] = nums.reduce((sum, value) => sum + value, 0) / nums.length;
-      counts[key] = nums.length;
-    }
-  });
+  if (!hasAnyValue) {
+    els.averageSummary.textContent = "还没有导入数据";
+    return;
+  }
 
-  return { averages, counts };
+  if (
+    saveMode === "average" &&
+    Object.keys(currentAverages).length > 0
+  ) {
+    els.averageSummary.textContent =
+      Object.entries(currentAverages)
+        .map(([key, value]) => {
+          const metric = metricDefs[key];
+          const count = currentCounts[key] || 0;
+
+          return `${metric.eye} ${metric.label}: ${formatMetricValue(value)} ${metric.unit}（n=${count}）`;
+        })
+        .join(" · ");
+
+    return;
+  }
+
+  els.averageSummary.textContent =
+    `已导入 ${pendingReadings.length} 条测量记录。直接保存将生成 ${pendingReadings.length} 个 data points；点击“计算平均值”后保存将生成 1 个 data point。`;
 }
+
 
 function formatMetricValue(value) {
   return Number(value).toFixed(2);
 }
 
 async function saveCurrentRecord() {
-  if (!activeProfileId) return;
-
-  if (Object.keys(currentAverages).length === 0) {
-    calculateAndShowAverage();
+  if (!activeProfileId) {
+    alert("请先选择用户");
+    return;
   }
 
-  if (Object.keys(currentAverages).length === 0) return;
+  if (!pendingReadings.length) {
+    alert("没有可保存的数据");
+    return;
+  }
 
-  const record = {
-    id: crypto.randomUUID(),
-    profileId: activeProfileId,
-    capturedAt: new Date(els.capturedAtInput.value || Date.now()).toISOString(),
-    createdAt: new Date().toISOString(),
-    averages: currentAverages,
-    counts: currentCounts,
-    readings: pendingReadings.map((reading) => ({
-      fileName: reading.fileName,
-      sourceImageName: reading.sourceImageName || reading.fileName,
-      text: reading.text,
-      values: reading.values,
-      status: reading.status,
-    })),
-  };
+  /*
+   * Mode 1:
+   * 保存平均值 → 一个 data point
+   */
+  if (
+    saveMode === "average" &&
+    Object.keys(currentAverages).length > 0
+  ) {
+    const measurementTimes = pendingReadings
+      .map((reading) => reading.measurementTime)
+      .filter(Boolean)
+      .map((value) =>
+        new Date(value.replace(" ", "T"))
+      )
+      .filter((date) => !Number.isNaN(date.getTime()));
 
-  await putItem(STORE_RECORDS, record);
+    let capturedAt;
 
-  currentAverages = {};
-  currentCounts = {};
+    if (measurementTimes.length) {
+      // 平均 data point 的时间：
+      // 使用这批 measurement 的平均时间
+      const averageTimestamp =
+        measurementTimes.reduce(
+          (sum, date) => sum + date.getTime(),
+          0
+        ) / measurementTimes.length;
+
+      capturedAt =
+        new Date(averageTimestamp).toISOString();
+    } else {
+      capturedAt =
+        new Date(
+          els.capturedAtInput.value || Date.now()
+        ).toISOString();
+    }
+
+    const record = {
+      id: crypto.randomUUID(),
+
+      profileId: activeProfileId,
+
+      capturedAt,
+
+      createdAt: new Date().toISOString(),
+
+      averages: currentAverages,
+
+      counts: currentCounts,
+
+      type: "average",
+
+      sourceCount: pendingReadings.length,
+    };
+
+    await putItem(
+      STORE_RECORDS,
+      record
+    );
+  }
+
+  /*
+   * Mode 2:
+   * 不计算平均值 → 每条 measurement 一个 data point
+   */
+  else {
+    const readingsWithTime =
+      resolveMeasurementTimes(pendingReadings);
+
+    for (const reading of readingsWithTime) {
+      const values =
+        reading.values || {};
+
+      if (!Object.keys(values).length) {
+        continue;
+      }
+
+      const counts = {};
+
+      Object.keys(values).forEach((key) => {
+        if (Number.isFinite(values[key])) {
+          counts[key] = 1;
+        }
+      });
+
+      const record = {
+        id: crypto.randomUUID(),
+
+        profileId: activeProfileId,
+
+        capturedAt:
+          reading.resolvedTime.toISOString(),
+
+        createdAt:
+          new Date().toISOString(),
+
+        averages: values,
+
+        counts,
+
+        type: "individual",
+
+        measurementTime:
+          reading.measurementTime || null,
+      };
+
+      await putItem(
+        STORE_RECORDS,
+        record
+      );
+    }
+  }
 
   clearUploads();
+
   await loadRecords();
+
   renderAll();
+
   switchTab("trends");
 }
 
 function clearUploads() {
-  const urls = new Set(pendingReadings.map((reading) => reading.previewUrl).filter(Boolean));
-  urls.forEach((url) => URL.revokeObjectURL(url));
   pendingReadings = [];
-  els.ocrStatus.textContent = "等待上传图片";
+
+  currentAverages = {};
+  currentCounts = {};
+  saveMode = "individual";
+
+  els.jsonInput.value = "";
+  els.jsonFileInput.value = "";
+  els.jsonFileName.textContent = "";
+
+  selectedJsonFile = null;
+
+  els.importStatus.textContent =
+    "粘贴 JSON 或选择 JSON 文件";
+
   renderUploads();
 }
 
@@ -1275,21 +823,80 @@ function renderRecords() {
   els.recordsList.innerHTML = "";
 
   if (!records.length) {
-    els.recordsList.textContent = "当前用户还没有记录";
+    els.recordsList.textContent =
+      "当前用户还没有记录";
     return;
   }
 
+  const table = document.createElement("table");
+  table.className = "records-table";
+
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>检查时间</th>
+        <th>项目</th>
+        <th>右眼</th>
+        <th>左眼</th>
+        <th>单位</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+
+  const tbody =
+    table.querySelector("tbody");
+
   records.forEach((record) => {
-    const div = document.createElement("div");
-    div.className = "record-item";
-    div.innerHTML = `
-      <strong>${new Date(record.capturedAt).toLocaleString()}</strong>
-      <p>${Object.entries(record.averages)
-        .map(([key, value]) => `${metricDefs[key]?.label || key}: ${formatMetricValue(value)}`)
-        .join(" · ")}</p>
-    `;
-    els.recordsList.appendChild(div);
+    metricRows.forEach((metric, index) => {
+      const tr =
+        document.createElement("tr");
+
+      const right =
+        record.averages?.[metric.rightKey];
+
+      const left =
+        record.averages?.[metric.leftKey];
+
+      tr.innerHTML = `
+        ${
+          index === 0
+            ? `
+              <td rowspan="${metricRows.length}">
+                ${new Date(
+                  record.capturedAt
+                ).toLocaleString()}
+              </td>
+            `
+            : ""
+        }
+
+        <td>${metric.label}</td>
+
+        <td>
+          ${
+            Number.isFinite(right)
+              ? formatMetricValue(right)
+              : "-"
+          }
+        </td>
+
+        <td>
+          ${
+            Number.isFinite(left)
+              ? formatMetricValue(left)
+              : "-"
+          }
+        </td>
+
+        <td>${metric.unit}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
   });
+
+  els.recordsList.appendChild(table);
 }
 
 function renderChart() {
@@ -1310,7 +917,7 @@ function renderChart() {
   const leftKey = `${currentChartMetric}Left`;
 
   const metricLabel =
-    metricDefs[rightKey]?.label ||
+    metricDefs[rightKey]?.label || 
     metricDefs[leftKey]?.label ||
     currentChartMetric;
 
@@ -1325,15 +932,19 @@ function renderChart() {
       datasets: [
         {
           label: `${metricLabel} 右眼`,
-          data: records.map((record) => record.values?.[rightKey] ?? null),
+          data: records.map(record => record.averages?.[rightKey] ?? null),
           tension: 0.3,
           spanGaps: true,
+          pointRadius: 5,
+          pointHoverRadius: 7,
         },
         {
           label: `${metricLabel} 左眼`,
-          data: records.map((record) => record.values?.[leftKey] ?? null),
+          data: records.map(record => record.averages?.[leftKey] ?? null),
           tension: 0.3,
           spanGaps: true,
+          pointRadius: 5,
+          pointHoverRadius: 7,
         },
       ],
     },
@@ -1354,4 +965,256 @@ function switchTab(tabName) {
   });
 
   if (tabName === "trends") renderChart();
+}
+
+
+
+function eyeJsonToValues(record) {
+  const values = {};
+
+  mapEye(record.right_eye, "Right", values);
+  mapEye(record.left_eye, "Left", values);
+
+  return values;
+}
+
+function mapEye(eye, suffix, values) {
+  if (!eye) {
+    return;
+  }
+
+  setIfNumber(values, `axial${suffix}`, eye.AL);
+  setIfNumber(values, `cornealThickness${suffix}`, eye.CT);
+  setIfNumber(values, `anteriorChamberDepth${suffix}`, eye.AD);
+  setIfNumber(values, `lensThickness${suffix}`, eye.LT);
+  setIfNumber(values, `vitreousChamberLength${suffix}`, eye.VT);
+
+  setIfNumber(values, `alCr${suffix}`, eye.AL_CR);
+
+  if (eye.K1) {
+    setIfNumber(values, `k1${suffix}`, eye.K1.value);
+    setIfNumber(values, `k1Axis${suffix}`, eye.K1.axis);
+  }
+
+  if (eye.K2) {
+    setIfNumber(values, `k2${suffix}`, eye.K2.value);
+    setIfNumber(values, `k2Axis${suffix}`, eye.K2.axis);
+  }
+
+  setIfNumber(values, `kappa${suffix}`, eye.Kappa);
+}
+
+function setIfNumber(target, key, value) {
+  const number = Number(value);
+
+  if (Number.isFinite(number)) {
+    target[key] = number;
+  }
+}
+
+function importMeasurementJson(json) {
+  if (!Array.isArray(json)) {
+    throw new Error("JSON 顶层必须是一个 array");
+  }
+
+  const imported = [];
+
+  json.forEach((record, index) => {
+    if (!record || typeof record !== "object") {
+      throw new Error(`第 ${index + 1} 条 record 格式错误`);
+    }
+
+    if (!record.right_eye && !record.left_eye) {
+      return;
+    }
+
+    imported.push({
+      id: crypto.randomUUID(),
+
+      fileName:
+        record.measurement_time ||
+        `JSON record ${index + 1}`,
+
+      file: null,
+      previewUrl: "",
+
+      status: "review",
+
+      text: record.note || "",
+
+      values: eyeJsonToValues(record),
+
+      sources: {},
+
+      measurementTime: record.measurement_time || null
+    });
+  });
+
+  if (imported.length === 0) {
+    throw new Error("JSON 中没有有效的眼部测量记录");
+  }
+
+  pendingReadings.push(...imported);
+
+  const firstMeasurementTime =
+  imported.find(item => item.measurementTime)?.measurementTime;
+
+if (firstMeasurementTime) {
+  els.capturedAtInput.value =
+    measurementTimeToLocalInput(firstMeasurementTime);
+}
+
+  els.importStatus.textContent =
+    `成功导入 ${imported.length} 条记录`;
+
+  renderUploads();
+}
+
+
+let selectedJsonFile = null;
+
+els.chooseJsonButton.addEventListener("click", () => {
+  els.jsonFileInput.click();
+});
+
+els.jsonFileInput.addEventListener("change", () => {
+  selectedJsonFile =
+    els.jsonFileInput.files?.[0] || null;
+
+  els.jsonFileName.textContent =
+    selectedJsonFile?.name || "";
+});
+
+els.importJsonButton.addEventListener("click", async () => {
+  try {
+    let text = els.jsonInput.value.trim();
+
+    if (!text && selectedJsonFile) {
+      text = await selectedJsonFile.text();
+    }
+
+    if (!text) {
+      throw new Error("请粘贴 JSON 或选择 JSON 文件");
+    }
+
+    console.log("JSON length:", text.length);
+console.log("First 20 chars:", JSON.stringify(text.slice(0, 20)));
+console.log("Last 20 chars:", JSON.stringify(text.slice(-20)));
+
+    const json = JSON.parse(text);
+
+    importMeasurementJson(json);
+
+    els.jsonInput.value = "";
+    els.jsonFileInput.value = "";
+    els.jsonFileName.textContent = "";
+    selectedJsonFile = null;
+
+  } catch (error) {
+    console.error(error);
+
+    els.importStatus.textContent =
+      `导入失败: ${error.message}`;
+  }
+});
+
+async function loadProfiles() {
+  profiles = await getAll(STORE_PROFILES);
+
+  const savedActive =
+    localStorage.getItem("activeProfileId");
+
+  if (
+    savedActive &&
+    profiles.some(profile => profile.id === savedActive)
+  ) {
+    activeProfileId = savedActive;
+  } else {
+    activeProfileId = profiles[0]?.id || null;
+  }
+}
+
+function measurementTimeToLocalInput(value) {
+  if (!value) return "";
+
+  // "2026-06-03 11:46:08" -> "2026-06-03T11:46"
+  return String(value)
+    .trim()
+    .replace(" ", "T")
+    .slice(0, 16);
+}
+
+function resolveMeasurementTimes(readings) {
+  const result = readings.map((reading) => ({
+    ...reading,
+    resolvedTime: null,
+  }));
+
+  // 先填已有时间
+  result.forEach((reading) => {
+    if (reading.measurementTime) {
+      const normalized =
+        reading.measurementTime.replace(" ", "T");
+
+      reading.resolvedTime =
+        new Date(normalized);
+    }
+  });
+
+  // 再给 null 时间补值
+  result.forEach((reading, index) => {
+    if (reading.resolvedTime) return;
+
+    // 优先找后面的已知时间
+    let nextKnownIndex = -1;
+
+    for (let i = index + 1; i < result.length; i++) {
+      if (result[i].resolvedTime) {
+        nextKnownIndex = i;
+        break;
+      }
+    }
+
+    if (nextKnownIndex !== -1) {
+      const base =
+        result[nextKnownIndex].resolvedTime;
+
+      reading.resolvedTime =
+        new Date(
+          base.getTime() -
+          (nextKnownIndex - index) * 1000
+        );
+
+      return;
+    }
+
+    // 如果后面没有，再找前面的已知时间
+    let previousKnownIndex = -1;
+
+    for (let i = index - 1; i >= 0; i--) {
+      if (result[i].resolvedTime) {
+        previousKnownIndex = i;
+        break;
+      }
+    }
+
+    if (previousKnownIndex !== -1) {
+      const base =
+        result[previousKnownIndex].resolvedTime;
+
+      reading.resolvedTime =
+        new Date(
+          base.getTime() +
+          (index - previousKnownIndex) * 1000
+        );
+
+      return;
+    }
+
+    // 整批都没有 measurement_time 时
+    reading.resolvedTime =
+      new Date(els.capturedAtInput.value || Date.now());
+  });
+
+  return result;
 }
