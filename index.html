@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Myopia Tracker</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=debug2" />
   <link rel="icon" href="data:," />
 </head>
 <body>
@@ -13,41 +13,41 @@
   <script type="module" src="./app.js?v=debug1"></script>
   <main class="app">
     <header class="topbar">
-      <h1>眼生物测量记录</h1>
-      <button id="installButton" type="button" hidden>↓ 安装</button>
+      <h1>Myopia Tracker</h1>
+      <button id="installButton" type="button" hidden>↓ install</button>
     </header>
 
     <section class="panel">
       <label>
-        当前用户
+        Name
         <select id="profileSelect"></select>
       </label>
 
       <label>
-        新用户
-        <input id="profileNameInput" type="text" placeholder="输入名字" />
+        New User
+        <input id="profileNameInput" type="text" placeholder="Name" />
       </label>
 
-      <button id="createProfileButton" type="button">创建</button>
+      <button id="createProfileButton" type="button">Create</button>
     </section>
 
     <nav class="tabs">
-      <button class="tab active" data-tab="upload" type="button">上传</button>
-      <button class="tab" data-tab="trends" type="button">趋势</button>
-      <button class="tab" data-tab="records" type="button">记录</button>
+      <button class="tab active" data-tab="upload" type="button">Upload</button>
+      <button class="tab" data-tab="trends" type="button">Trending</button>
+      <button class="tab" data-tab="records" type="button">Records</button>
     </nav>
 
     <section id="uploadTab" class="tab-panel active">
       <div class="panel">
         <label>
-          检查时间
+          Date & Time
           <input id="capturedAtInput" type="datetime-local" />
         </label>
       </div>
 
       <div class="json-import-panel">
   <label for="jsonInput">
-    粘贴 JSON
+    Paste your JSON
   </label>
 
   <textarea
@@ -67,7 +67,7 @@
   ></textarea>
 
   <div class="json-divider">
-    或
+    Or
   </div>
 
   <input
@@ -82,7 +82,7 @@
     class="secondary-button"
     type="button"
   >
-    选择 JSON 文件
+    Choose JSON
   </button>
 
   <span id="jsonFileName"></span>
@@ -90,27 +90,27 @@
 
 <div class="actions">
   <button id="importJsonButton" type="button">
-    导入 JSON
+    Import JSON
   </button>
 
   <button id="clearUploadsButton" type="button">
-    清空
+    Clear
   </button>
 </div>
 
 <p id="importStatus">
-  粘贴 JSON 或选择 JSON 文件
+  Paste JSON Or Choose JSON
 </p>
 
       <div id="uploadList"></div>
 
       <section class="average-box">
-  <h2>当次平均值</h2>
-  <p id="averageSummary">请先确认每条 record，然后点击“计算平均值”</p>
+  <h2>Calculate Average Value</h2>
+  <p id="averageSummary">“Calculate”</p>
 
   <div class="actions">
-    <button id="calculateButton" type="button" disabled>计算平均值</button>
-    <button id="saveRecordButton" type="button" disabled>保存数据</button>
+    <button id="calculateButton" type="button" disabled>Calculate average</button>
+    <button id="saveRecordButton" type="button" disabled>Save Datapoints</button>
   </div>
 </section>
     </section>
@@ -131,17 +131,17 @@
 <div class="trend-chart-container">
   <canvas id="trendCanvas"></canvas>
 </div>
-      <p id="emptyTrendMessage">当前用户还没有记录</p>
+      <p id="emptyTrendMessage">No recrods found for this user</p>
     </section>
 
     <section id="recordsTab" class="tab-panel">
       <div class="actions">
-        <button id="exportButton" type="button">导出 JSON</button>
+        <button id="exportButton" type="button">export JSON</button>
         <label class="import-button">
-          导入 JSON
+          import JSON
           <input id="importInput" type="file" accept="application/json" />
         </label>
-        <button id="deleteProfileButton" type="button">删除当前用户</button>
+        <button id="deleteProfileButton" type="button">Delete User</button>
       </div>
 
       <div id="recordsList"></div>
@@ -152,7 +152,7 @@
     <article class="reading-card">
       <div class="reading-header">
         <h3></h3>
-        <span class="status-pill">待确认</span>
+        <span class="status-pill">Confirm</span>
       </div>
 
       <img class="preview" alt="uploaded preview" />
@@ -160,7 +160,7 @@
       <div class="metric-grid"></div>
 
       <details>
-        <summary>识别文本</summary>
+        <summary>Recognize</summary>
         <pre></pre>
       </details>
     </article>
