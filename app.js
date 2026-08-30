@@ -1,3 +1,9 @@
+import {
+  paginateRecords,
+  filterTrendRecords,
+  getTrendDensity,
+} from "./ui-logic.mjs";
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 
 import {
@@ -33,67 +39,69 @@ let pendingReadings = [];
 let records = [];
 let currentChartMetric = "axial";
 let chart;
-
 let currentAverages = {};
 let currentCounts = {};
 let saveMode = "individual";
+let recordsPage = 1;
+const RECORDS_PER_PAGE = 10;
+let trendRange = "12m";
 
 const metricDefs = {
-  axialRight: { label: "AL 眼轴", eye: "右眼", unit: "mm" },
-  axialLeft: { label: "AL 眼轴", eye: "左眼", unit: "mm" },
+  axialRight: { label: "AL Axial Length", eye: "Right Eye", unit: "mm" },
+  axialLeft: { label: "AL Axial Length", eye: "Left Eye", unit: "mm" },
 
-  cornealThicknessRight: { label: "CT 角膜厚度", eye: "右眼", unit: "um" },
-  cornealThicknessLeft: { label: "CT 角膜厚度", eye: "左眼", unit: "um" },
+  cornealThicknessRight: { label: "CT Corneal Thickness", eye: "Right Eye", unit: "um" },
+  cornealThicknessLeft: { label: "CT Corneal Thickness", eye: "Left Eye", unit: "um" },
 
-  anteriorChamberDepthRight: { label: "AD 前房深度", eye: "右眼", unit: "mm" },
-  anteriorChamberDepthLeft: { label: "AD 前房深度", eye: "左眼", unit: "mm" },
+  anteriorChamberDepthRight: { label: "AD Anterior Chamber Depth", eye: "Right Eye", unit: "mm" },
+  anteriorChamberDepthLeft: { label: "AD Anterior Chamber Depth", eye: "Left Eye", unit: "mm" },
 
-  lensThicknessRight: { label: "LT 晶状体厚度", eye: "右眼", unit: "mm" },
-  lensThicknessLeft: { label: "LT 晶状体厚度", eye: "左眼", unit: "mm" },
+  lensThicknessRight: { label: "LT Lens Thickness", eye: "Right Eye", unit: "mm" },
+  lensThicknessLeft: { label: "LT Lens Thickness", eye: "Left Eye", unit: "mm" },
 
-  vitreousChamberLengthRight: { label: "VT 玻璃体腔长度", eye: "右眼", unit: "mm" },
-  vitreousChamberLengthLeft: { label: "VT 玻璃体腔长度", eye: "左眼", unit: "mm" },
+  vitreousChamberLengthRight: { label: "VT Vitreous Chamber Length", eye: "Right Eye", unit: "mm" },
+  vitreousChamberLengthLeft: { label: "VT Vitreous Chamber Length", eye: "Left Eye", unit: "mm" },
 
-  alCrRight: { label: "AL/CR", eye: "右眼", unit: "" },
-  alCrLeft: { label: "AL/CR", eye: "左眼", unit: "" },
+  alCrRight: { label: "AL/CR", eye: "Right Eye", unit: "" },
+  alCrLeft: { label: "AL/CR", eye: "Left Eye", unit: "" },
 
-  k1Right: { label: "K1", eye: "右眼", unit: "D" },
-  k1Left: { label: "K1", eye: "左眼", unit: "D" },
+  k1Right: { label: "K1", eye: "Right Eye", unit: "D" },
+  k1Left: { label: "K1", eye: "Left Eye", unit: "D" },
 
-  k2Right: { label: "K2", eye: "右眼", unit: "D" },
-  k2Left: { label: "K2", eye: "左眼", unit: "D" },
+  k2Right: { label: "K2", eye: "Right Eye", unit: "D" },
+  k2Left: { label: "K2", eye: "Left Eye", unit: "D" },
 
-  kappaRight: { label: "Kappa", eye: "右眼", unit: "" },
-  kappaLeft: { label: "Kappa", eye: "左眼", unit: "" },
+  kappaRight: { label: "Kappa", eye: "Right Eye", unit: "" },
+  kappaLeft: { label: "Kappa", eye: "Left Eye", unit: "" },
 };
 
 const metricRows = [
   {
-    label: "AL 眼轴",
+    label: "AL Axial Length",
     unit: "mm",
     rightKey: "axialRight",
     leftKey: "axialLeft",
   },
   {
-    label: "CT 角膜厚度",
+    label: "CT Corneal Thickness",
     unit: "um",
     rightKey: "cornealThicknessRight",
     leftKey: "cornealThicknessLeft",
   },
   {
-    label: "AD 前房深度",
+    label: "AD Anterior Chamber Depth",
     unit: "mm",
     rightKey: "anteriorChamberDepthRight",
     leftKey: "anteriorChamberDepthLeft",
   },
   {
-    label: "LT 晶状体厚度",
+    label: "LT Lens Thickness",
     unit: "mm",
     rightKey: "lensThicknessRight",
     leftKey: "lensThicknessLeft",
   },
   {
-    label: "VT 玻璃体腔长度",
+    label: "VT Vitreous Chamber Length",
     unit: "mm",
     rightKey: "vitreousChamberLengthRight",
     leftKey: "vitreousChamberLengthLeft",
@@ -125,6 +133,8 @@ const metricRows = [
 ];
 
 
+const metricOrder = Object.keys(metricDefs);
+
 const els = {
   profileSelect: document.querySelector("#profileSelect"),
   profileNameInput: document.querySelector("#profileNameInput"),
@@ -138,13 +148,19 @@ const els = {
   importStatus: document.querySelector("#importStatus"),
   uploadList: document.querySelector("#uploadList"),
   averageSummary: document.querySelector("#averageSummary"),
+  calculateButton: document.querySelector("#calculateButton"),
   saveRecordButton: document.querySelector("#saveRecordButton"),
   readingTemplate: document.querySelector("#readingTemplate"),
   recordsList: document.querySelector("#recordsList"),
   emptyTrendMessage: document.querySelector("#emptyTrendMessage"),
   trendCanvas: document.querySelector("#trendCanvas"),
   clearUploadsButton: document.querySelector("#clearUploadsButton"),
-  calculateButton: document.querySelector("#calculateButton"),
+  recordsPagination: document.querySelector("#recordsPagination"),
+  recordsPageInfo: document.querySelector("#recordsPageInfo"),
+  recordsPageNumber: document.querySelector("#recordsPageNumber"),
+  recordsPrevButton: document.querySelector("#recordsPrevButton"),
+  recordsNextButton: document.querySelector("#recordsNextButton"),
+  trendRangeControls: document.querySelector("#trendRangeControls"),
 };
 
 init();
@@ -173,15 +189,16 @@ function bindEvents() {
         activeProfileId || ""
       );
 
+      recordsPage = 1;
       await loadRecords();
       renderAll();
     }
   );
 
   els.calculateButton.addEventListener(
-  "click",
-  calculateAndShowAverage
-);
+    "click",
+    calculateAndShowAverage
+  );
 
   els.saveRecordButton.addEventListener(
     "click",
@@ -217,6 +234,30 @@ function bindEvents() {
         renderChart();
       });
     });
+
+  els.recordsPrevButton.addEventListener("click", () => {
+    recordsPage = Math.max(1, recordsPage - 1);
+    renderRecords();
+  });
+
+  els.recordsNextButton.addEventListener("click", () => {
+    recordsPage += 1;
+    renderRecords();
+  });
+
+  els.trendRangeControls.querySelectorAll("[data-trend-range]").forEach((button) => {
+    button.addEventListener("click", () => {
+      trendRange = button.dataset.trendRange;
+      els.trendRangeControls.querySelectorAll("[data-trend-range]").forEach((item) => {
+        item.classList.toggle("active", item === button);
+      });
+      renderChart();
+    });
+  });
+}
+
+async function openDb() {
+  return realtimeDb;
 }
 
 async function getAll(storeName) {
@@ -286,14 +327,14 @@ async function createProfile() {
   const name = els.profileNameInput.value.trim();
 
   if (!name) {
-    alert("请输入新用户名字");
+    alert("Please enter a profile name");
     els.profileNameInput.focus();
     return;
   }
 
   try {
     els.createProfileButton.disabled = true;
-    els.createProfileButton.textContent = "创建中...";
+    els.createProfileButton.textContent = "Creating...";
 
     const profile = {
       id: crypto.randomUUID(),
@@ -315,10 +356,10 @@ async function createProfile() {
 
   } catch (error) {
     console.error("Create profile failed:", error);
-    alert(`创建用户失败：${error.message || error}`);
+    alert(`Failed to create profile: ${error.message || error}`);
   } finally {
     els.createProfileButton.disabled = false;
-    els.createProfileButton.textContent = "创建";
+    els.createProfileButton.textContent = "Create";
   }
 }
 
@@ -366,7 +407,7 @@ function renderUploads() {
     const pre = node.querySelector("pre");
 
     title.textContent = reading.fileName;
-    status.textContent = "已导入";
+    status.textContent = "Imported";
 
     if (reading.previewUrl) {
       img.src = reading.previewUrl;
@@ -392,11 +433,9 @@ function renderUploads() {
     delete reading.values[key];
   }
 
-  // 数据改过以后，之前计算的平均值失效
   currentAverages = {};
   currentCounts = {};
   saveMode = "individual";
-
   updateAverageSummary();
 });
     });
@@ -419,7 +458,7 @@ function assignBiometryGroup(values, sources, side, group, sourceLine) {
 
   setEditableValue(values, sources, `axial${suffix}`, axial, sourceLine);
 
-  // CT 正常是 450-700；如果 OCR 读成 55.0 / 56.6，不要强行填
+  // Typical CT values are 450-700; do not force-fill obvious OCR errors such as 55.0 / 56.6.
   if (ct >= 450 && ct <= 700) {
     setEditableValue(values, sources, `cornealThickness${suffix}`, ct, sourceLine);
   }
@@ -447,7 +486,7 @@ function extractOneBiometryGroup(nums) {
 }
 
 function parseEditableKLine(line, nums, kPairs, values, sources) {
-  // 理想情况：左右眼各有 K1/K2，共 4 个 pair
+  // Ideal case: K1/K2 pairs for both eyes, 4 pairs total.
   if (kPairs.length >= 4) {
     const rightKappa = findKappaAfterPairs(nums, 0);
     const leftKappa = findKappaAfterPairs(nums, 1);
@@ -466,7 +505,7 @@ function parseEditableKLine(line, nums, kPairs, values, sources) {
     return;
   }
 
-  // 一边数据：先填右眼，再填左眼
+  // Single-eye data: fill the right eye first, then the left eye.
   const side = values.k1Right == null ? "Right" : "Left";
   const suffix = side === "Right" ? "Right" : "Left";
 
@@ -486,7 +525,7 @@ function parseEditableKLine(line, nums, kPairs, values, sources) {
 function findKappaAfterPairs(nums, sideIndex) {
   const possible = nums.filter((num) => num > 0 && num < 10);
 
-  // 右眼通常是第一个小数 kappa，左眼通常是第二个
+  // The first small decimal is usually right-eye kappa; the second is usually left-eye kappa.
   return possible[sideIndex] ?? null;
 }
 
@@ -559,10 +598,10 @@ function renderMetricInputs(container) {
     <table class="reading-table">
       <thead>
         <tr>
-          <th>项目</th>
-          <th>右眼</th>
-          <th>左眼</th>
-          <th>单位</th>
+          <th>Metric</th>
+          <th>Right Eye</th>
+          <th>Left Eye</th>
+          <th>Unit</th>
         </tr>
       </thead>
       <tbody>
@@ -576,7 +615,7 @@ function renderMetricInputs(container) {
                     type="number"
                     step="0.01"
                     data-metric="${row.rightKey}"
-                    placeholder="待填写"
+                    placeholder="Enter value"
                   />
                 </td>
                 <td>
@@ -584,7 +623,7 @@ function renderMetricInputs(container) {
                     type="number"
                     step="0.01"
                     data-metric="${row.leftKey}"
-                    placeholder="待填写"
+                    placeholder="Enter value"
                   />
                 </td>
                 <td>${row.unit}</td>
@@ -595,36 +634,6 @@ function renderMetricInputs(container) {
       </tbody>
     </table>
   `;
-}
-
-function calculateAndShowAverage() {
-  const averages = {};
-  const counts = {};
-
-  Object.keys(metricDefs).forEach((key) => {
-    const values = pendingReadings
-      .map((reading) => reading.values?.[key])
-      .filter((value) => Number.isFinite(value));
-
-    if (!values.length) {
-      return;
-    }
-
-    averages[key] =
-      values.reduce(
-        (sum, value) => sum + value,
-        0
-      ) / values.length;
-
-    counts[key] = values.length;
-  });
-
-  currentAverages = averages;
-  currentCounts = counts;
-
-  saveMode = "average";
-
-  updateAverageSummary();
 }
 
 function updateAverageSummary() {
@@ -638,31 +647,47 @@ function updateAverageSummary() {
   els.saveRecordButton.disabled = !hasAnyValue;
 
   if (!hasAnyValue) {
-    els.averageSummary.textContent = "还没有导入数据";
+    els.averageSummary.textContent = "No data imported yet";
     return;
   }
 
-  if (
-    saveMode === "average" &&
-    Object.keys(currentAverages).length > 0
-  ) {
-    els.averageSummary.textContent =
-      Object.entries(currentAverages)
-        .map(([key, value]) => {
-          const metric = metricDefs[key];
-          const count = currentCounts[key] || 0;
+  if (saveMode === "average" && Object.keys(currentAverages).length > 0) {
+    const summary = Object.entries(currentAverages)
+      .map(([key, value]) => {
+        const metric = metricDefs[key];
+        const count = currentCounts[key] || 0;
+        return `${metric.eye} ${metric.label}: ${formatMetricValue(value)} ${metric.unit}（n=${count}）`;
+      })
+      .join(" · ");
 
-          return `${metric.eye} ${metric.label}: ${formatMetricValue(value)} ${metric.unit}（n=${count}）`;
-        })
-        .join(" · ");
-
+    els.averageSummary.textContent = `${summary}. Saving will create 1 averaged data point.`;
     return;
   }
 
   els.averageSummary.textContent =
-    `已导入 ${pendingReadings.length} 条测量记录。直接保存将生成 ${pendingReadings.length} 个 data points；点击“计算平均值”后保存将生成 1 个 data point。`;
+    `Imported ${pendingReadings.length} measurements. Save now to create ${pendingReadings.length} data points, or calculate the average first to save 1 averaged data point.`;
 }
 
+function calculateAndShowAverage() {
+  const averages = {};
+  const counts = {};
+
+  Object.keys(metricDefs).forEach((key) => {
+    const values = pendingReadings
+      .map((reading) => reading.values?.[key])
+      .filter((value) => Number.isFinite(value));
+
+    if (!values.length) return;
+
+    averages[key] = values.reduce((sum, value) => sum + value, 0) / values.length;
+    counts[key] = values.length;
+  });
+
+  currentAverages = averages;
+  currentCounts = counts;
+  saveMode = "average";
+  updateAverageSummary();
+}
 
 function formatMetricValue(value) {
   return Number(value).toFixed(2);
@@ -670,139 +695,129 @@ function formatMetricValue(value) {
 
 async function saveCurrentRecord() {
   if (!activeProfileId) {
-    alert("请先选择用户");
+    alert("Please select a profile first");
     return;
   }
 
   if (!pendingReadings.length) {
-    alert("没有可保存的数据");
+    alert("There is no data to save");
     return;
   }
 
-  /*
-   * Mode 1:
-   * 保存平均值 → 一个 data point
-   */
-  if (
-    saveMode === "average" &&
-    Object.keys(currentAverages).length > 0
-  ) {
-    const measurementTimes = pendingReadings
-      .map((reading) => reading.measurementTime)
-      .filter(Boolean)
-      .map((value) =>
-        new Date(value.replace(" ", "T"))
-      )
-      .filter((date) => !Number.isNaN(date.getTime()));
+  const readingsWithTime = resolveMeasurementTimes(pendingReadings);
 
-    let capturedAt;
+  if (saveMode === "average" && Object.keys(currentAverages).length > 0) {
+    const timestamps = readingsWithTime
+      .map((reading) => reading.resolvedTime?.getTime())
+      .filter(Number.isFinite);
 
-    if (measurementTimes.length) {
-      // 平均 data point 的时间：
-      // 使用这批 measurement 的平均时间
-      const averageTimestamp =
-        measurementTimes.reduce(
-          (sum, date) => sum + date.getTime(),
-          0
-        ) / measurementTimes.length;
-
-      capturedAt =
-        new Date(averageTimestamp).toISOString();
-    } else {
-      capturedAt =
-        new Date(
-          els.capturedAtInput.value || Date.now()
-        ).toISOString();
-    }
+    const averageTimestamp = timestamps.length
+      ? timestamps.reduce((sum, value) => sum + value, 0) / timestamps.length
+      : Date.now();
 
     const record = {
       id: crypto.randomUUID(),
-
       profileId: activeProfileId,
-
-      capturedAt,
-
+      capturedAt: new Date(averageTimestamp).toISOString(),
       createdAt: new Date().toISOString(),
-
       averages: currentAverages,
-
       counts: currentCounts,
-
       type: "average",
-
       sourceCount: pendingReadings.length,
     };
 
-    await putItem(
-      STORE_RECORDS,
-      record
-    );
-  }
-
-  /*
-   * Mode 2:
-   * 不计算平均值 → 每条 measurement 一个 data point
-   */
-  else {
-    const readingsWithTime =
-      resolveMeasurementTimes(pendingReadings);
-
+    await putItem(STORE_RECORDS, record);
+  } else {
     for (const reading of readingsWithTime) {
-      const values =
-        reading.values || {};
-
-      if (!Object.keys(values).length) {
-        continue;
-      }
+      const values = reading.values || {};
+      if (!Object.keys(values).length) continue;
 
       const counts = {};
-
       Object.keys(values).forEach((key) => {
-        if (Number.isFinite(values[key])) {
-          counts[key] = 1;
-        }
+        if (Number.isFinite(values[key])) counts[key] = 1;
       });
 
       const record = {
         id: crypto.randomUUID(),
-
         profileId: activeProfileId,
-
-        capturedAt:
-          reading.resolvedTime.toISOString(),
-
-        createdAt:
-          new Date().toISOString(),
-
+        capturedAt: reading.resolvedTime.toISOString(),
+        createdAt: new Date().toISOString(),
         averages: values,
-
         counts,
-
         type: "individual",
-
-        measurementTime:
-          reading.measurementTime || null,
+        measurementTime: reading.measurementTime || null,
       };
 
-      await putItem(
-        STORE_RECORDS,
-        record
-      );
+      await putItem(STORE_RECORDS, record);
     }
   }
 
   clearUploads();
-
   await loadRecords();
-
   renderAll();
-
   switchTab("trends");
+}
+
+function resolveMeasurementTimes(readings) {
+  const result = readings.map((reading) => ({
+    ...reading,
+    resolvedTime: parseMeasurementTime(reading.measurementTime),
+  }));
+
+  const hasKnownTime = result.some((reading) => reading.resolvedTime);
+
+  if (!hasKnownTime) {
+    const base = new Date(els.capturedAtInput.value || Date.now());
+    result.forEach((reading, index) => {
+      reading.resolvedTime = new Date(base.getTime() + index * 1000);
+    });
+    return result;
+  }
+
+  result.forEach((reading, index) => {
+    if (reading.resolvedTime) return;
+
+    let nextKnownIndex = -1;
+    for (let i = index + 1; i < result.length; i += 1) {
+      if (result[i].resolvedTime) {
+        nextKnownIndex = i;
+        break;
+      }
+    }
+
+    if (nextKnownIndex !== -1) {
+      const base = result[nextKnownIndex].resolvedTime;
+      reading.resolvedTime = new Date(
+        base.getTime() - (nextKnownIndex - index) * 1000
+      );
+      return;
+    }
+
+    let previousKnownIndex = -1;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      if (result[i].resolvedTime) {
+        previousKnownIndex = i;
+        break;
+      }
+    }
+
+    const base = result[previousKnownIndex].resolvedTime;
+    reading.resolvedTime = new Date(
+      base.getTime() + (index - previousKnownIndex) * 1000
+    );
+  });
+
+  return result;
+}
+
+function parseMeasurementTime(value) {
+  if (!value) return null;
+  const date = new Date(String(value).trim().replace(" ", "T"));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function clearUploads() {
   pendingReadings = [];
-
   currentAverages = {};
   currentCounts = {};
   saveMode = "individual";
@@ -810,11 +825,10 @@ function clearUploads() {
   els.jsonInput.value = "";
   els.jsonFileInput.value = "";
   els.jsonFileName.textContent = "";
-
   selectedJsonFile = null;
 
   els.importStatus.textContent =
-    "粘贴 JSON 或选择 JSON 文件";
+    "Paste JSON or choose a JSON file";
 
   renderUploads();
 }
@@ -824,9 +838,18 @@ function renderRecords() {
 
   if (!records.length) {
     els.recordsList.textContent =
-      "当前用户还没有记录";
+      "No records for the current profile yet";
+    els.recordsPagination.hidden = true;
     return;
   }
+
+  const newestFirst = [...records].reverse();
+  const pageData = paginateRecords(
+    newestFirst,
+    recordsPage,
+    RECORDS_PER_PAGE
+  );
+  recordsPage = pageData.page;
 
   const table = document.createElement("table");
   table.className = "records-table";
@@ -834,61 +857,37 @@ function renderRecords() {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>检查时间</th>
-        <th>项目</th>
-        <th>右眼</th>
-        <th>左眼</th>
-        <th>单位</th>
+        <th>Measurement Time</th>
+        <th>Metric</th>
+        <th>Right Eye</th>
+        <th>Left Eye</th>
+        <th>Unit</th>
       </tr>
     </thead>
     <tbody></tbody>
   `;
 
-  const tbody =
-    table.querySelector("tbody");
+  const tbody = table.querySelector("tbody");
 
-  records.forEach((record) => {
+  pageData.items.forEach((record) => {
     metricRows.forEach((metric, index) => {
-      const tr =
-        document.createElement("tr");
-
-      const right =
-        record.averages?.[metric.rightKey];
-
-      const left =
-        record.averages?.[metric.leftKey];
+      const tr = document.createElement("tr");
+      const right = record.averages?.[metric.rightKey];
+      const left = record.averages?.[metric.leftKey];
 
       tr.innerHTML = `
         ${
           index === 0
             ? `
-              <td rowspan="${metricRows.length}">
-                ${new Date(
-                  record.capturedAt
-                ).toLocaleString()}
+              <td rowspan="${metricRows.length}" class="record-date-cell">
+                ${new Date(record.capturedAt).toLocaleString()}
               </td>
             `
             : ""
         }
-
         <td>${metric.label}</td>
-
-        <td>
-          ${
-            Number.isFinite(right)
-              ? formatMetricValue(right)
-              : "-"
-          }
-        </td>
-
-        <td>
-          ${
-            Number.isFinite(left)
-              ? formatMetricValue(left)
-              : "-"
-          }
-        </td>
-
+        <td>${Number.isFinite(right) ? formatMetricValue(right) : "-"}</td>
+        <td>${Number.isFinite(left) ? formatMetricValue(left) : "-"}</td>
         <td>${metric.unit}</td>
       `;
 
@@ -897,6 +896,13 @@ function renderRecords() {
   });
 
   els.recordsList.appendChild(table);
+  els.recordsPagination.hidden = false;
+  els.recordsPageInfo.textContent =
+    `Showing ${pageData.startNumber}-${pageData.endNumber} of ${pageData.total} records`;
+  els.recordsPageNumber.textContent =
+    `Page ${pageData.page} of ${pageData.totalPages}`;
+  els.recordsPrevButton.disabled = pageData.page <= 1;
+  els.recordsNextButton.disabled = pageData.page >= pageData.totalPages;
 }
 
 function renderChart() {
@@ -909,48 +915,99 @@ function renderChart() {
   }
 
   const existingChart = Chart.getChart(canvas);
-  if (existingChart) {
-    existingChart.destroy();
-  }
+  if (existingChart) existingChart.destroy();
 
   const rightKey = `${currentChartMetric}Right`;
   const leftKey = `${currentChartMetric}Left`;
-
   const metricLabel =
-    metricDefs[rightKey]?.label || 
+    metricDefs[rightKey]?.label ||
     metricDefs[leftKey]?.label ||
     currentChartMetric;
 
-  els.emptyTrendMessage.hidden = records.length > 0;
+  // Keep every measurement as a raw data point. The selected range only
+  // filters time; longer ranges reduce visual density through smaller points
+  // and fewer x-axis labels, never by merging measurements.
+  const trendRecords = filterTrendRecords(records, trendRange);
+  const density = getTrendDensity(trendRange, trendRecords.length);
+
+  els.emptyTrendMessage.hidden = trendRecords.length > 0;
+  canvas.parentElement.hidden = trendRecords.length === 0;
+  if (!trendRecords.length) return;
+
+  const labels = trendRecords.map((record) => {
+    const date = new Date(record.capturedAt || record.date);
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: trendRange === "12m" || trendRange === "year" ? "numeric" : undefined,
+      year: "numeric",
+    });
+  });
 
   chart = new Chart(canvas, {
     type: "line",
     data: {
-      labels: records.map((record) =>
-        new Date(record.capturedAt || record.date).toLocaleDateString()
-      ),
+      labels,
       datasets: [
         {
-          label: `${metricLabel} 右眼`,
-          data: records.map(record => record.averages?.[rightKey] ?? null),
-          tension: 0.3,
+          label: `${metricLabel} Right Eye`,
+          data: trendRecords.map(record => record.averages?.[rightKey] ?? null),
+          borderColor: "#4f9bb5",
+          backgroundColor: "rgba(79, 155, 181, 0.10)",
+          pointBackgroundColor: "#ffffff",
+          pointBorderColor: "#4f9bb5",
+          pointBorderWidth: 2,
+          borderWidth: 3,
+          tension: 0.35,
           spanGaps: true,
-          pointRadius: 5,
-          pointHoverRadius: 7,
+          pointRadius: density.pointRadius,
+          pointHoverRadius: density.pointHoverRadius,
         },
         {
-          label: `${metricLabel} 左眼`,
-          data: records.map(record => record.averages?.[leftKey] ?? null),
-          tension: 0.3,
+          label: `${metricLabel} Left Eye`,
+          data: trendRecords.map(record => record.averages?.[leftKey] ?? null),
+          borderColor: "#8a55cc",
+          backgroundColor: "rgba(138, 85, 204, 0.10)",
+          pointBackgroundColor: "#ffffff",
+          pointBorderColor: "#8a55cc",
+          pointBorderWidth: 2,
+          borderWidth: 3,
+          tension: 0.35,
           spanGaps: true,
-          pointRadius: 5,
-          pointHoverRadius: 7,
+          pointRadius: density.pointRadius,
+          pointHoverRadius: density.pointHoverRadius,
         },
       ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: {
+        mode: "nearest",
+        intersect: false,
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: {
+            autoSkip: true,
+            maxTicksLimit: density.maxTicksLimit,
+            maxRotation: 0,
+          },
+        },
+      },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            title(items) {
+              const index = items[0]?.dataIndex;
+              if (index == null) return "";
+              return new Date(
+                trendRecords[index].capturedAt || trendRecords[index].date
+              ).toLocaleString();
+            },
+          },
+        },
+      },
     },
   });
 }
@@ -1005,6 +1062,7 @@ function mapEye(eye, suffix, values) {
 }
 
 function setIfNumber(target, key, value) {
+  if (value === null || value === undefined || value === "") return;
   const number = Number(value);
 
   if (Number.isFinite(number)) {
@@ -1014,14 +1072,14 @@ function setIfNumber(target, key, value) {
 
 function importMeasurementJson(json) {
   if (!Array.isArray(json)) {
-    throw new Error("JSON 顶层必须是一个 array");
+    throw new Error("The top-level JSON value must be an array");
   }
 
   const imported = [];
 
   json.forEach((record, index) => {
     if (!record || typeof record !== "object") {
-      throw new Error(`第 ${index + 1} 条 record 格式错误`);
+      throw new Error(`Record ${index + 1} has an invalid format`);
     }
 
     if (!record.right_eye && !record.left_eye) {
@@ -1051,10 +1109,13 @@ function importMeasurementJson(json) {
   });
 
   if (imported.length === 0) {
-    throw new Error("JSON 中没有有效的眼部测量记录");
+    throw new Error("No valid eye measurements were found in the JSON");
   }
 
   pendingReadings.push(...imported);
+  currentAverages = {};
+  currentCounts = {};
+  saveMode = "individual";
 
   const firstMeasurementTime =
   imported.find(item => item.measurementTime)?.measurementTime;
@@ -1065,7 +1126,7 @@ if (firstMeasurementTime) {
 }
 
   els.importStatus.textContent =
-    `成功导入 ${imported.length} 条记录`;
+    `Imported ${imported.length} records successfully`;
 
   renderUploads();
 }
@@ -1094,7 +1155,7 @@ els.importJsonButton.addEventListener("click", async () => {
     }
 
     if (!text) {
-      throw new Error("请粘贴 JSON 或选择 JSON 文件");
+      throw new Error("Paste JSON or choose a JSON file");
     }
 
     console.log("JSON length:", text.length);
@@ -1114,7 +1175,7 @@ console.log("Last 20 chars:", JSON.stringify(text.slice(-20)));
     console.error(error);
 
     els.importStatus.textContent =
-      `导入失败: ${error.message}`;
+      `Import failed: ${error.message}`;
   }
 });
 
@@ -1142,79 +1203,4 @@ function measurementTimeToLocalInput(value) {
     .trim()
     .replace(" ", "T")
     .slice(0, 16);
-}
-
-function resolveMeasurementTimes(readings) {
-  const result = readings.map((reading) => ({
-    ...reading,
-    resolvedTime: null,
-  }));
-
-  // 先填已有时间
-  result.forEach((reading) => {
-    if (reading.measurementTime) {
-      const normalized =
-        reading.measurementTime.replace(" ", "T");
-
-      reading.resolvedTime =
-        new Date(normalized);
-    }
-  });
-
-  // 再给 null 时间补值
-  result.forEach((reading, index) => {
-    if (reading.resolvedTime) return;
-
-    // 优先找后面的已知时间
-    let nextKnownIndex = -1;
-
-    for (let i = index + 1; i < result.length; i++) {
-      if (result[i].resolvedTime) {
-        nextKnownIndex = i;
-        break;
-      }
-    }
-
-    if (nextKnownIndex !== -1) {
-      const base =
-        result[nextKnownIndex].resolvedTime;
-
-      reading.resolvedTime =
-        new Date(
-          base.getTime() -
-          (nextKnownIndex - index) * 1000
-        );
-
-      return;
-    }
-
-    // 如果后面没有，再找前面的已知时间
-    let previousKnownIndex = -1;
-
-    for (let i = index - 1; i >= 0; i--) {
-      if (result[i].resolvedTime) {
-        previousKnownIndex = i;
-        break;
-      }
-    }
-
-    if (previousKnownIndex !== -1) {
-      const base =
-        result[previousKnownIndex].resolvedTime;
-
-      reading.resolvedTime =
-        new Date(
-          base.getTime() +
-          (index - previousKnownIndex) * 1000
-        );
-
-      return;
-    }
-
-    // 整批都没有 measurement_time 时
-    reading.resolvedTime =
-      new Date(els.capturedAtInput.value || Date.now());
-  });
-
-  return result;
 }

@@ -1,168 +1,116 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Myopia Tracker</title>
-  <link rel="stylesheet" href="./styles.css?v=debug2" />
+  <link rel="stylesheet" href="./styles.css?v=range-pagination1" />
   <link rel="icon" href="data:," />
 </head>
 <body>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script type="module" src="./app.js?v=debug1"></script>
+  <script type="module" src="./app.js?v=range-pagination1"></script>
   <main class="app">
     <header class="topbar">
-      <h1>Myopia Tracker</h1>
-      <button id="installButton" type="button" hidden>↓ install</button>
+      <div><span class="eyebrow">MYOPIA TRACKER</span><h1>Eye Biometry Tracker</h1></div>
+      <button id="installButton" type="button" hidden>↓ Install</button>
     </header>
 
     <section class="panel">
-      <label>
-        Name
-        <select id="profileSelect"></select>
-      </label>
-
-      <label>
-        New User
-        <input id="profileNameInput" type="text" placeholder="Name" />
-      </label>
-
+      <label>Current Profile<select id="profileSelect"></select></label>
+      <label>New Profile<input id="profileNameInput" type="text" placeholder="Enter name" /></label>
       <button id="createProfileButton" type="button">Create</button>
     </section>
 
     <nav class="tabs">
       <button class="tab active" data-tab="upload" type="button">Upload</button>
-      <button class="tab" data-tab="trends" type="button">Trending</button>
+      <button class="tab" data-tab="trends" type="button">Trends</button>
       <button class="tab" data-tab="records" type="button">Records</button>
     </nav>
 
     <section id="uploadTab" class="tab-panel active">
       <div class="panel">
-        <label>
-          Date & Time
-          <input id="capturedAtInput" type="datetime-local" />
-        </label>
+        <label>Measurement Time<input id="capturedAtInput" type="datetime-local" /></label>
       </div>
 
       <div class="json-import-panel">
-  <label for="jsonInput">
-    Paste your JSON
-  </label>
+        <label for="jsonInput">Paste JSON</label>
+        <textarea id="jsonInput" rows="10" placeholder='[{"measurement_time":"2026-06-03 11:46:08"}]'></textarea>
+        <div class="json-divider">or</div>
+        <input id="jsonFileInput" class="file-input" type="file" accept=".json,application/json" />
+        <button id="chooseJsonButton" class="secondary-button" type="button">Choose JSON File</button>
+        <span id="jsonFileName"></span>
+      </div>
 
-  <textarea
-    id="jsonInput"
-    rows="10"
-    placeholder='[
-  {
-    "measurement_time": "2026-06-03 11:46:08",
-    "right_eye": {
-      "AL": 24.55
-    },
-    "left_eye": {
-      "AL": 24.55
-    }
-  }
-]'
-  ></textarea>
+      <div class="actions">
+        <button id="importJsonButton" type="button">Import JSON</button>
+        <button id="clearUploadsButton" type="button">Clear</button>
+      </div>
 
-  <div class="json-divider">
-    Or
-  </div>
-
-  <input
-    id="jsonFileInput"
-    class="file-input"
-    type="file"
-    accept=".json,application/json"
-  />
-
-  <button
-    id="chooseJsonButton"
-    class="secondary-button"
-    type="button"
-  >
-    Choose JSON
-  </button>
-
-  <span id="jsonFileName"></span>
-</div>
-
-<div class="actions">
-  <button id="importJsonButton" type="button">
-    Import JSON
-  </button>
-
-  <button id="clearUploadsButton" type="button">
-    Clear
-  </button>
-</div>
-
-<p id="importStatus">
-  Paste JSON Or Choose JSON
-</p>
-
+      <p id="importStatus">Paste JSON or choose a JSON file</p>
       <div id="uploadList"></div>
 
       <section class="average-box">
-  <h2>Calculate Average Value</h2>
-  <p id="averageSummary">“Calculate”</p>
-
-  <div class="actions">
-    <button id="calculateButton" type="button" disabled>Calculate average</button>
-    <button id="saveRecordButton" type="button" disabled>Save Datapoints</button>
-  </div>
-</section>
+        <span class="section-kicker">SUMMARY</span><h2>Current Average</h2>
+        <p id="averageSummary">Import data to get started</p>
+        <div class="actions">
+          <button id="calculateButton" type="button" disabled>Calculate Average</button>
+          <button id="saveRecordButton" type="button" disabled>Save Data</button>
+        </div>
+      </section>
     </section>
 
     <section id="trendsTab" class="tab-panel">
       <div class="metric-tabs">
-  <button class="metric-tab active" data-chart-metric="axial" type="button">AL 眼轴</button>
-  <button class="metric-tab" data-chart-metric="cornealThickness" type="button">CT</button>
-  <button class="metric-tab" data-chart-metric="anteriorChamberDepth" type="button">AD</button>
-  <button class="metric-tab" data-chart-metric="lensThickness" type="button">LT</button>
-  <button class="metric-tab" data-chart-metric="vitreousChamberLength" type="button">VT</button>
-  <button class="metric-tab" data-chart-metric="alCr" type="button">AL/CR</button>
-  <button class="metric-tab" data-chart-metric="k1" type="button">K1</button>
-  <button class="metric-tab" data-chart-metric="k2" type="button">K2</button>
-  <button class="metric-tab" data-chart-metric="kappa" type="button">Kappa</button>
-</div>
-
-<div class="trend-chart-container">
-  <canvas id="trendCanvas"></canvas>
-</div>
-      <p id="emptyTrendMessage">No recrods found for this user</p>
+        <button class="metric-tab active" data-chart-metric="axial" type="button">AL Axial Length</button>
+        <button class="metric-tab" data-chart-metric="cornealThickness" type="button">CT</button>
+        <button class="metric-tab" data-chart-metric="anteriorChamberDepth" type="button">AD</button>
+        <button class="metric-tab" data-chart-metric="lensThickness" type="button">LT</button>
+        <button class="metric-tab" data-chart-metric="vitreousChamberLength" type="button">VT</button>
+        <button class="metric-tab" data-chart-metric="alCr" type="button">AL/CR</button>
+        <button class="metric-tab" data-chart-metric="k1" type="button">K1</button>
+        <button class="metric-tab" data-chart-metric="k2" type="button">K2</button>
+        <button class="metric-tab" data-chart-metric="kappa" type="button">Kappa</button>
+      </div>
+      <div class="trend-range-bar" id="trendRangeControls" aria-label="Trend time range">
+        <span class="trend-range-label">Time Range</span>
+        <div class="trend-range-buttons">
+          <button class="trend-range-button active" data-trend-range="12m" type="button">Last 12 months</button>
+          <button class="trend-range-button" data-trend-range="year" type="button">This year</button>
+          <button class="trend-range-button" data-trend-range="2y" type="button">2 years</button>
+          <button class="trend-range-button" data-trend-range="3y" type="button">3 years</button>
+          <button class="trend-range-button" data-trend-range="4y" type="button">4 years</button>
+          <button class="trend-range-button" data-trend-range="5y" type="button">5 years</button>
+        </div>
+      </div>
+      <div class="trend-chart-container"><canvas id="trendCanvas"></canvas></div>
+      <p id="emptyTrendMessage">No records in the selected time range</p>
     </section>
 
     <section id="recordsTab" class="tab-panel">
       <div class="actions">
-        <button id="exportButton" type="button">export JSON</button>
-        <label class="import-button">
-          import JSON
-          <input id="importInput" type="file" accept="application/json" />
-        </label>
-        <button id="deleteProfileButton" type="button">Delete User</button>
+        <button id="exportButton" type="button">Export JSON</button>
+        <label class="import-button">Import JSON<input id="importInput" type="file" accept="application/json" /></label>
+        <button id="deleteProfileButton" type="button">Delete Current Profile</button>
       </div>
-
       <div id="recordsList"></div>
+      <div class="records-pagination" id="recordsPagination" hidden>
+        <span id="recordsPageInfo" class="records-page-info"></span>
+        <div class="records-page-actions">
+          <button id="recordsPrevButton" class="secondary-button" type="button">Previous</button>
+          <span id="recordsPageNumber" class="records-page-number"></span>
+          <button id="recordsNextButton" class="secondary-button" type="button">Next</button>
+        </div>
+      </div>
     </section>
   </main>
 
   <template id="readingTemplate">
     <article class="reading-card">
-      <div class="reading-header">
-        <h3></h3>
-        <span class="status-pill">Confirm</span>
-      </div>
-
+      <div class="reading-header"><h3></h3><span class="status-pill">Pending Review</span></div>
       <img class="preview" alt="uploaded preview" />
-
       <div class="metric-grid"></div>
-
-      <details>
-        <summary>Recognize</summary>
-        <pre></pre>
-      </details>
+      <details><summary>Source Text</summary><pre></pre></details>
     </article>
   </template>
 </body>
